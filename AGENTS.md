@@ -48,6 +48,7 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
 ## 前端约束
 
 - i18n：所有用户可见文案走 i18n 词条，不硬编码（i18n 方案在首次涉及文案时选型引入，并更新本文件）
+- 亮暗模式：全站支持亮/暗主题（默认跟随系统，可手动切换），用 Tailwind 的 dark variant 实现；新 UI 两种模式都要可用
 - 响应式：桌面 / 平板 / 手机三档都要可用，优先用 Tailwind 断点实现
 - 无障碍：优先语义化 HTML；交互元素可键盘操作，图片有 alt，表单控件有 label；不要压制 Svelte 编译器的 a11y 警告
 
@@ -67,7 +68,7 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
 
 - Rust 改动：`cargo fmt`、`cargo check`、`cargo clippy` 必须全部通过，clippy 不留警告
 - 前端改动：`pnpm check`、`pnpm lint` 必须全部通过
-- 前端 UI 改动：还需用浏览器（Chrome DevTools MCP）打开实际页面直观评估——布局与交互正常、三档断点可用、console 无报错
+- 前端 UI 改动：还需用浏览器（Chrome DevTools MCP）打开实际页面直观评估——布局与交互正常、三档断点可用、亮暗两种模式正常、console 无报错
 
 ## 代码约定
 
