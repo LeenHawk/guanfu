@@ -6,17 +6,17 @@ use crate::CoreError;
 
 /// 双向协议转换计划。
 ///
-/// `source` 为应用内部 canonical 线格式（OpenAI Chat Completions），
-/// `target` 为渠道原生格式。请求走正向 pair，响应/SSE 走反向 pair
-/// （与 gproxy 自身 pipeline 的用法一致）。source == target 时直通。
-pub struct ExchangePlan {
+/// `source` 为调用方提交的 wire 格式，`target` 为渠道路由表选出的上游格式。
+/// 请求走正向 pair，响应/SSE 走反向 pair（与 gproxy pipeline 的用法一致）。
+/// source == target 时直通。
+pub struct TransformPlan {
     source: OperationKey,
     target: OperationKey,
     forward: Option<TransformPair>,
     reverse: Option<TransformPair>,
 }
 
-impl ExchangePlan {
+impl TransformPlan {
     pub fn plan(source: OperationKey, target: OperationKey) -> Result<Self, CoreError> {
         if source == target {
             return Ok(Self {

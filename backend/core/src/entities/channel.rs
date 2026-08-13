@@ -9,13 +9,13 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(unique)]
     pub name: String,
-    /// Provider 家族："openai" | "claude" | "gemini"
-    pub provider: String,
     pub base_url: String,
     pub enabled: bool,
-    pub created_at: DateTimeUtc,
+    pub created_at: TimeDateTimeWithTimeZone,
     #[sea_orm(has_many)]
     pub credentials: HasMany<super::credential::Entity>,
+    #[sea_orm(has_many)]
+    pub routing_rules: HasMany<super::routing_rule::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

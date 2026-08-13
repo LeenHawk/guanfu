@@ -16,8 +16,8 @@ pub struct Model {
     pub weight: i32,
     pub disabled: bool,
     pub failure_count: i32,
-    pub cooldown_until: Option<DateTimeUtc>,
-    pub last_used_at: Option<DateTimeUtc>,
+    pub cooldown_until: Option<TimeDateTimeWithTimeZone>,
+    pub last_used_at: Option<TimeDateTimeWithTimeZone>,
     #[sea_orm(belongs_to, from = "channel_id", to = "id")]
     pub channel: HasOne<super::channel::Entity>,
 }

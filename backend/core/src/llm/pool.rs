@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use time::{Duration, OffsetDateTime};
 
 use crate::entities::credential;
 
@@ -39,7 +39,7 @@ pub fn cooldown_after(kind: FailureKind, failure_count: i32) -> Option<Duration>
 }
 
 /// 可用性 = 未禁用且冷却已过期。
-pub fn is_usable(c: &credential::Model, now: DateTime<Utc>) -> bool {
+pub fn is_usable(c: &credential::Model, now: OffsetDateTime) -> bool {
     !c.disabled && c.cooldown_until.is_none_or(|t| t <= now)
 }
 
@@ -48,7 +48,7 @@ pub fn is_usable(c: &credential::Model, now: DateTime<Utc>) -> bool {
 pub fn order_credentials(
     creds: &[credential::Model],
     rotation: usize,
-    now: DateTime<Utc>,
+    now: OffsetDateTime,
 ) -> Vec<&credential::Model> {
     let mut usable: Vec<&credential::Model> = creds.iter().filter(|c| is_usable(c, now)).collect();
     usable.sort_by(|a, b| b.weight.cmp(&a.weight).then(a.id.cmp(&b.id)));
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn ordering_filters_sorts_and_rotates() {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let creds = vec![cred(1, 1, false), cred(2, 5, false), cred(3, 5, true)];
         let ordered = order_credentials(&creds, 0, now);
         assert_eq!(ordered.iter().map(|c| c.id).collect::<Vec<_>>(), vec![2, 1]);

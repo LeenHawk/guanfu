@@ -1,4 +1,5 @@
 use std::pin::Pin;
+use std::sync::Once;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -8,10 +9,9 @@ use gproxy_protocol::{OperationKey, Provider};
 
 use crate::CoreError;
 
-/// 一次上游调用的目标：渠道地址 + provider 家族 + 凭证。
+/// 一次上游调用的目标：渠道地址 + 凭证。
 pub struct CallTarget<'a> {
     pub base_url: &'a str,
-    pub provider: Provider,
     pub secret: &'a str,
 }
 
@@ -52,6 +52,12 @@ impl Default for LlmClient {
 
 impl LlmClient {
     pub fn new() -> Self {
+        static INSTALL_RUSTLS_PROVIDER: Once = Once::new();
+        INSTALL_RUSTLS_PROVIDER.call_once(|| {
+            // reqwest 0.13 的 `rustls-no-provider` 允许选择 ring，避免默认
+            // AWS-LC provider；若宿主已安装 provider，则保留宿主选择。
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .build()
@@ -79,7 +85,7 @@ impl LlmClient {
         }
         let method: reqwest::Method = rt.method.into();
         let mut req = self.http.request(method, url);
-        req = apply_auth(req, target.provider, target.secret);
+        req = apply_auth(req, key.provider_family(), target.secret);
         if let Some(body) = body {
             req = req
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -100,7 +106,8 @@ impl LlmClient {
     }
 }
 
-/// 各 provider 家族的鉴权头。
+/// 临时按目标 wire family 选择标准鉴权头。
+/// 特殊上游的请求准备逻辑后续应由独立 channel adapter 承担。
 fn apply_auth(
     req: reqwest::RequestBuilder,
     provider: Provider,

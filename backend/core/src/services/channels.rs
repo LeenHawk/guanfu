@@ -1,12 +1,11 @@
-use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set,
     TransactionSession, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
-use crate::entities::{channel, credential};
-use crate::llm::capability::parse_provider;
+use crate::entities::{channel, credential, routing_rule};
 use crate::CoreError;
 
 /// 对适配层暴露的渠道视图。
@@ -14,7 +13,6 @@ use crate::CoreError;
 pub struct ChannelDto {
     pub id: i32,
     pub name: String,
-    pub provider: String,
     pub base_url: String,
     pub enabled: bool,
 }
@@ -33,7 +31,6 @@ pub struct CredentialDto {
 #[derive(Clone, Debug, Deserialize)]
 pub struct NewChannel {
     pub name: String,
-    pub provider: String,
     pub base_url: String,
 }
 
@@ -50,7 +47,6 @@ impl From<channel::Model> for ChannelDto {
         Self {
             id: m.id,
             name: m.name,
-            provider: m.provider,
             base_url: m.base_url,
             enabled: m.enabled,
         }
@@ -78,14 +74,11 @@ impl ChannelService {
         db: &impl ConnectionTrait,
         input: NewChannel,
     ) -> Result<ChannelDto, CoreError> {
-        parse_provider(&input.provider)
-            .ok_or_else(|| CoreError::UnknownProvider(input.provider.clone()))?;
         let m = channel::ActiveModel {
             name: Set(input.name),
-            provider: Set(input.provider),
             base_url: Set(input.base_url),
             enabled: Set(true),
-            created_at: Set(Utc::now()),
+            created_at: Set(OffsetDateTime::now_utc()),
             ..Default::default()
         }
         .insert(db)
@@ -123,6 +116,10 @@ impl ChannelService {
         id: i32,
     ) -> Result<(), CoreError> {
         let txn = db.begin().await?;
+        routing_rule::Entity::delete_many()
+            .filter(routing_rule::Column::ChannelId.eq(id))
+            .exec(&txn)
+            .await?;
         credential::Entity::delete_many()
             .filter(credential::Column::ChannelId.eq(id))
             .exec(&txn)

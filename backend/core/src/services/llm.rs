@@ -1,26 +1,27 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use chrono::Utc;
 use futures_util::StreamExt;
-use gproxy_protocol::Provider;
+use gproxy_protocol::OperationKey;
 use gproxy_transform::stream_adapter::SseTransformer;
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use time::OffsetDateTime;
 
-use crate::entities::{channel, credential};
-use crate::llm::capability::{self, Capability};
+use crate::entities::{channel, credential, routing_rule};
 use crate::llm::client::{ByteStream, CallTarget, LlmClient, LlmReply, LlmResponse};
-use crate::llm::exchange::ExchangePlan;
 use crate::llm::pool::{self, FailureKind};
+use crate::llm::routing::{self, RouteDecision};
+use crate::llm::transform::TransformPlan;
 use crate::CoreError;
 
 pub struct LlmRequest {
     pub channel_id: i32,
-    pub capability: Capability,
+    /// 调用方提供的请求体所使用的 operation 与 wire kind。
+    pub operation: OperationKey,
     pub model: String,
     pub stream: bool,
-    /// canonical（OpenAI Chat Completions）线格式的 JSON 请求体；无体操作为 None。
+    /// `operation` 对应 wire 格式的 JSON 请求体；无体操作为 None。
     pub body: Option<Vec<u8>>,
 }
 
@@ -54,19 +55,36 @@ impl LlmService {
             .await?
             .filter(|c| c.enabled)
             .ok_or(CoreError::ChannelNotFound(req.channel_id))?;
-        let provider = capability::parse_provider(&ch.provider)
-            .ok_or_else(|| CoreError::UnknownProvider(ch.provider.clone()))?;
-        let target_key = capability::operation_key(req.capability, provider, req.stream)
-            .ok_or(CoreError::UnsupportedCapability(req.capability))?;
-
-        // 内容生成走 canonical → 渠道原生的转换；其余操作以渠道原生协议直连。
-        let plan = if req.capability == Capability::GenerateContent {
-            let source_key =
-                capability::operation_key(req.capability, Provider::OpenAi, req.stream)
-                    .expect("canonical generation key always exists");
-            Some(ExchangePlan::plan(source_key, target_key)?)
-        } else {
-            None
+        let rules = routing_rule::Entity::find()
+            .filter(routing_rule::Column::ChannelId.eq(ch.id))
+            .all(db)
+            .await?;
+        let source_key = req.operation;
+        let (target_key, plan) = match routing::decide(&rules, source_key)? {
+            RouteDecision::Passthrough => (source_key, None),
+            RouteDecision::TransformTo(target) if target == source_key => (source_key, None),
+            RouteDecision::TransformTo(target) => {
+                if target.operation().is_content_generation()
+                    != source_key.operation().is_content_generation()
+                    || target.operation() != source_key.operation()
+                {
+                    return Err(CoreError::UnsupportedRouteImplementation {
+                        implementation: "cross-operation transform_to",
+                    });
+                }
+                (target, Some(TransformPlan::plan(source_key, target)?))
+            }
+            RouteDecision::Local => {
+                return Err(CoreError::UnsupportedRouteImplementation {
+                    implementation: "local",
+                });
+            }
+            RouteDecision::Unsupported => {
+                return Err(CoreError::UnsupportedRoute {
+                    channel_id: ch.id,
+                    operation: source_key,
+                });
+            }
         };
         let body = match (&plan, req.body) {
             (Some(p), Some(b)) => Some(p.transform_request(&b)?),
@@ -78,7 +96,7 @@ impl LlmService {
             .all(db)
             .await?;
         let rotation = self.rotation.fetch_add(1, Ordering::Relaxed);
-        let ordered = pool::order_credentials(&creds, rotation, Utc::now());
+        let ordered = pool::order_credentials(&creds, rotation, OffsetDateTime::now_utc());
         if ordered.is_empty() {
             return Err(CoreError::NoUsableCredential(ch.id));
         }
@@ -87,7 +105,6 @@ impl LlmService {
         for cred in ordered {
             let target = CallTarget {
                 base_url: &ch.base_url,
-                provider,
                 secret: &cred.secret,
             };
             let reply = match self
@@ -119,7 +136,7 @@ impl LlmService {
 }
 
 /// 成功后的响应/流转换（直通时原样返回）。
-fn finish(reply: LlmReply, plan: Option<ExchangePlan>) -> Result<LlmReply, CoreError> {
+fn finish(reply: LlmReply, plan: Option<TransformPlan>) -> Result<LlmReply, CoreError> {
     let Some(plan) = plan else { return Ok(reply) };
     match reply {
         LlmReply::Complete(r) => {
@@ -194,7 +211,7 @@ async fn mark_success(
     let mut am: credential::ActiveModel = cred.clone().into();
     am.failure_count = Set(0);
     am.cooldown_until = Set(None);
-    am.last_used_at = Set(Some(Utc::now()));
+    am.last_used_at = Set(Some(OffsetDateTime::now_utc()));
     am.update(db).await?;
     Ok(())
 }
@@ -215,7 +232,7 @@ async fn mark_failure(
     if let Some(d) = pool::cooldown_after(kind, cred.failure_count + 1) {
         update = update.col_expr(
             credential::Column::CooldownUntil,
-            Expr::value(Some(Utc::now() + d)),
+            Expr::value(Some(OffsetDateTime::now_utc() + d)),
         );
     }
     update.exec(db).await?;
