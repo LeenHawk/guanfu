@@ -1,10 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <link id="app-favicon" rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tauri + SvelteKit + Typescript App</title>
+    <script>
+      const savedTheme = localStorage.getItem("guanfu-theme") || "system";
+      const dark =
+        savedTheme === "dark" ||
+        (savedTheme === "system" &&
+          matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.classList.toggle("dark", dark);
+    </script>
+    <title>观复</title>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
