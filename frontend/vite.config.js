@@ -29,5 +29,8 @@ export default defineConfig(() => ({
       // 3. tell Vite to ignore watching the Rust backend
       ignored: ["**/backend/**"],
     },
+    proxy: {
+      "/api": "http://127.0.0.1:3000",
+    },
   },
 }));

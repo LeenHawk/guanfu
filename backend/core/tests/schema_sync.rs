@@ -2,7 +2,9 @@
 
 use gproxy_protocol::{ContentGenerationKind, Operation, OperationKey};
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
-use guanfu_core::services::routing::{PutRoutingRule, RoutingImplementation, RoutingService};
+use guanfu_core::services::routing::{
+    OperationKeyDto, PutRoutingRule, RoutingImplementation, RoutingService,
+};
 
 #[tokio::test]
 async fn entity_first_sync_and_crud() {
@@ -52,8 +54,10 @@ async fn entity_first_sync_and_crud() {
         &db,
         PutRoutingRule {
             channel_id: ch.id,
-            source,
-            implementation: RoutingImplementation::TransformTo { target },
+            source: source.try_into().unwrap(),
+            implementation: RoutingImplementation::TransformTo {
+                target: target.try_into().unwrap(),
+            },
             sort_order: 0,
             enabled: true,
         },
@@ -62,10 +66,12 @@ async fn entity_first_sync_and_crud() {
     .unwrap();
     let rules = RoutingService::list_rules(&db, ch.id).await.unwrap();
     assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0].source, source);
+    assert_eq!(rules[0].source, OperationKeyDto::try_from(source).unwrap());
     assert_eq!(
         rules[0].implementation,
-        RoutingImplementation::TransformTo { target }
+        RoutingImplementation::TransformTo {
+            target: target.try_into().unwrap()
+        }
     );
 
     ChannelService::delete_channel(&db, ch.id).await.unwrap();

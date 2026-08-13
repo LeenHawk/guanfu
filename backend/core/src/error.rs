@@ -39,7 +39,7 @@ pub enum CoreError {
     Upstream { status: u16, body: String },
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     Database,
@@ -52,7 +52,7 @@ pub enum ErrorCode {
     UpstreamRejected,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
 pub struct ApiError {
     pub code: ErrorCode,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -9,29 +9,59 @@ use crate::entities::{channel, routing_rule};
 use crate::llm::routing;
 use crate::CoreError;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+pub struct OperationKeyDto {
+    pub operation: RoutingOperation,
+    pub kind: RoutingKind,
+}
+
+impl TryFrom<OperationKeyDto> for OperationKey {
+    type Error = CoreError;
+
+    fn try_from(value: OperationKeyDto) -> Result<Self, Self::Error> {
+        OperationKey::try_new(value.operation.into(), value.kind.into()).map_err(|error| {
+            CoreError::InvalidRoutingRule {
+                id: None,
+                reason: error.to_string(),
+            }
+        })
+    }
+}
+
+impl TryFrom<OperationKey> for OperationKeyDto {
+    type Error = CoreError;
+
+    fn try_from(value: OperationKey) -> Result<Self, Self::Error> {
+        Ok(Self {
+            operation: routing::store_operation(value.operation())?,
+            kind: routing::store_kind(value.kind())?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RoutingImplementation {
     Passthrough,
-    TransformTo { target: OperationKey },
+    TransformTo { target: OperationKeyDto },
     Local,
     Unsupported,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct RoutingRuleDto {
     pub id: i32,
     pub channel_id: i32,
-    pub source: OperationKey,
+    pub source: OperationKeyDto,
     pub implementation: RoutingImplementation,
     pub sort_order: i32,
     pub enabled: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct PutRoutingRule {
     pub channel_id: i32,
-    pub source: OperationKey,
+    pub source: OperationKeyDto,
     pub implementation: RoutingImplementation,
     pub sort_order: i32,
     pub enabled: bool,
@@ -51,8 +81,9 @@ impl RoutingService {
             .ok_or(CoreError::ChannelNotFound(input.channel_id))?;
 
         let now = OffsetDateTime::now_utc();
-        let operation = routing::store_operation(input.source.operation())?;
-        let kind = routing::store_kind(input.source.kind())?;
+        let source: OperationKey = input.source.try_into()?;
+        let operation = routing::store_operation(source.operation())?;
+        let kind = routing::store_kind(source.kind())?;
         let (implementation, dest_operation, dest_kind) = encode(&input.implementation)?;
         let model = routing_rule::ActiveModel {
             channel_id: Set(input.channel_id),
@@ -133,8 +164,8 @@ fn encode(
         RoutingImplementation::Unsupported => (RouteImplementation::Unsupported, None, None),
         RoutingImplementation::TransformTo { target } => (
             RouteImplementation::TransformTo,
-            Some(routing::store_operation(target.operation())?),
-            Some(routing::store_kind(target.kind())?),
+            Some(target.operation),
+            Some(target.kind),
         ),
     })
 }
@@ -143,16 +174,16 @@ fn decode(model: routing_rule::Model) -> Result<RoutingRuleDto, CoreError> {
     let (source, decision) = routing::compile_rule(&model)?;
     let implementation = match decision {
         routing::RouteDecision::Passthrough => RoutingImplementation::Passthrough,
-        routing::RouteDecision::TransformTo(target) => {
-            RoutingImplementation::TransformTo { target }
-        }
+        routing::RouteDecision::TransformTo(target) => RoutingImplementation::TransformTo {
+            target: target.try_into()?,
+        },
         routing::RouteDecision::Local => RoutingImplementation::Local,
         routing::RouteDecision::Unsupported => RoutingImplementation::Unsupported,
     };
     Ok(RoutingRuleDto {
         id: model.id,
         channel_id: model.channel_id,
-        source,
+        source: source.try_into()?,
         implementation,
         sort_order: model.sort_order,
         enabled: model.enabled,

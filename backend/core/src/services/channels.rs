@@ -9,7 +9,7 @@ use crate::entities::{channel, credential, routing_rule};
 use crate::CoreError;
 
 /// 对适配层暴露的渠道视图。
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct ChannelDto {
     pub id: i32,
     pub name: String,
@@ -18,7 +18,7 @@ pub struct ChannelDto {
 }
 
 /// 凭证视图；不含 secret，避免泄露到前端。
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct CredentialDto {
     pub id: i32,
     pub channel_id: i32,
@@ -28,13 +28,13 @@ pub struct CredentialDto {
     pub failure_count: i32,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct NewChannel {
     pub name: String,
     pub base_url: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct NewCredential {
     pub channel_id: i32,
     pub label: String,

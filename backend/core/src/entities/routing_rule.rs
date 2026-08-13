@@ -2,7 +2,19 @@ use sea_orm::entity::prelude::*;
 
 use gproxy_protocol::{ContentGenerationKind, Operation, OperationKind, Provider};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    serde::Deserialize,
+    serde::Serialize,
+    ts_rs::TS,
+)]
+#[serde(rename_all = "snake_case")]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 pub enum RoutingOperation {
     #[sea_orm(string_value = "list_models")]
@@ -41,12 +53,25 @@ pub enum RoutingOperation {
     ConnectRealtime,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    serde::Deserialize,
+    serde::Serialize,
+    ts_rs::TS,
+)]
+#[serde(rename_all = "snake_case")]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 pub enum RoutingKind {
     #[sea_orm(string_value = "open_ai_responses")]
     OpenAiResponses,
     #[sea_orm(string_value = "open_ai_responses_websocket")]
+    #[serde(rename = "open_ai_responses_websocket")]
     OpenAiResponsesWebSocket,
     #[sea_orm(string_value = "open_ai_chat_completions")]
     OpenAiChatCompletions,
