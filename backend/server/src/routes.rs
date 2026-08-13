@@ -1,10 +1,12 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use guanfu_core::error::ApiError;
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
+use guanfu_core::services::llm::{ChatEvent, LlmOutput, LlmRequestDto};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingService};
 use guanfu_core::{AppState, CoreError};
 
@@ -23,7 +25,42 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/credentials/{id}", delete(remove_credential))
         .route("/api/routing-rules/{id}", delete(remove_routing_rule))
+        .route("/api/llm", axum::routing::post(execute_llm))
         .with_state(state)
+}
+
+async fn execute_llm(
+    State(state): State<AppState>,
+    Json(input): Json<LlmRequestDto>,
+) -> Result<Response, HttpError> {
+    match state.llm.execute(&state.db, input.try_into()?).await? {
+        LlmOutput::Complete(reply) => Ok(Json(reply).into_response()),
+        LlmOutput::Stream(stream) => {
+            use futures_util::StreamExt;
+            let stream = stream.map(|item| {
+                let event = match item {
+                    Ok(event) => event,
+                    Err(error) => ChatEvent::Error {
+                        error: error.api_error(),
+                    },
+                };
+                Ok::<_, std::convert::Infallible>(
+                    Event::default()
+                        .event(event_name(&event))
+                        .data(serde_json::to_string(&event).expect("ChatEvent is serializable")),
+                )
+            });
+            Ok(Sse::new(stream).into_response())
+        }
+    }
+}
+
+fn event_name(event: &ChatEvent) -> &'static str {
+    match event {
+        ChatEvent::Frame { .. } => "frame",
+        ChatEvent::Done => "done",
+        ChatEvent::Error { .. } => "error",
+    }
 }
 
 struct HttpError(ApiError);

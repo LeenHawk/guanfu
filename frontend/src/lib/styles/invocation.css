@@ -1,0 +1,47 @@
+.invocation-form {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(160px, 0.5fr) minmax(280px, 1.5fr) auto auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.invocation-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.invocation-form input,
+.invocation-form textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 11px;
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.config-section h4 {
+  margin: 22px 0 8px;
+  font-size: 12px;
+}
+
+.invocation-result {
+  min-height: 80px;
+  max-height: 320px;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  color: var(--color-muted);
+  background: var(--color-surface);
+  font-size: 11px;
+  white-space: pre-wrap;
+}

@@ -17,19 +17,19 @@
 
 目标：后端骨架真正跑起来，双壳共用同一 core。
 
-- [ ] `AppState`（db + LlmService + 结构化 Config）启动时构建；Tauri State 与 Axum State 共用同一结构
-- [ ] DB 初始化：桌面端用应用数据目录下的 SQLite；`sync_schema` 收敛到唯一调用点
-- [ ] tracing 初始化（两壳各自 init subscriber，core 只打点）
-- [ ] `CoreError` → 稳定 error code 映射（作为 DTO 契约的一部分）
-- [ ] Tauri commands + 最小 Axum server：渠道 / 凭证 / 路由规则 CRUD，两侧都只做薄适配
-- [ ] `LlmClient` 补非流式请求总超时（流式仅 connect timeout）
+- [x] `AppState`（db + LlmService + 结构化 Config）启动时构建；Tauri State 与 Axum State 共用同一结构
+- [x] DB 初始化：桌面端用应用数据目录下的 SQLite；`sync_schema` 收敛到唯一调用点
+- [x] tracing 初始化（两壳各自 init subscriber，core 只打点）
+- [x] `CoreError` → 稳定 error code 映射（作为 DTO 契约的一部分）
+- [x] Tauri commands + 最小 Axum server：渠道 / 凭证 / 路由规则 CRUD，两侧都只做薄适配
+- [x] `LlmClient` 补非流式请求总超时（流式仅 connect timeout）
 
 验收：`pnpm tauri dev` 内可调 CRUD；`curl` 对 Axum 可调同一组接口；门禁全绿。
 
 ## 阶段 2：契约与前端数据层
 
-- [ ] ts-rs：给边界 DTO 挂 `#[derive(TS)]`，生成 `frontend/src/lib/bindings/`；固化生成命令（如 `pnpm gen:bindings`）
-- [ ] 前端 API 抽象层：运行环境探测，Tauri 走 invoke、浏览器走 fetch；错误按 error code 统一处理
+- [x] ts-rs：给边界 DTO 挂 `#[derive(TS)]`，生成 `frontend/src/lib/bindings/`；固化生成命令（如 `pnpm gen:bindings`）
+- [x] 前端 API 抽象层：运行环境探测，Tauri 走 invoke、浏览器走 fetch；错误按 error code 统一处理
 
 验收：前端能通过抽象层列出并创建渠道（临时页面即可）。
 
@@ -37,10 +37,10 @@
 
 目标：第一块真实界面，同时落地欠着的前端基建。
 
-- [ ] i18n 引入（Paraglide；中文默认 + fallback），首批词条，AGENTS.md 回填方案
-- [ ] 主题系统：Tailwind `dark:`、跟随系统 + 手动切换、首屏无闪烁、favicon 亮暗切换
-- [ ] 渠道 / 凭证 / 路由矩阵管理页面：表单验证、loading/empty/error 状态、移动端可用
-- [ ] Chrome DevTools 直观验收：三档断点、亮暗两模式、console 干净
+- [x] i18n 引入（Paraglide；中文默认 + fallback），首批词条，AGENTS.md 回填方案
+- [x] 主题系统：Tailwind `dark:`、跟随系统 + 手动切换、首屏无闪烁、favicon 亮暗切换
+- [x] 渠道 / 凭证 / 路由矩阵管理页面：表单验证、loading/empty/error 状态、移动端可用
+- [x] Chrome DevTools 直观验收：三档断点、亮暗两模式、console 干净
 
 验收：能在 UI 里完整配置一个真实渠道（含凭证与路由规则）。
 
@@ -48,10 +48,10 @@
 
 目标：把字节流升格为结构化事件流，打通生成链路。
 
-- [ ] core 定义传输无关的流式事件 enum（ChatEvent 一类），替代裸 SSE 字节透传给上层
-- [ ] Tauri 壳映射 Channel、Axum 壳映射 SSE——同一事件流，两壳只做映射
-- [ ] 取消传播（客户端断开 → 上游请求中止）与统一超时语义
-- [ ] `local` 路由实现落地：count_tokens 走 gproxy-tokenize 本地阶梯
+- [x] core 定义传输无关的流式事件 enum（ChatEvent 一类），替代裸 SSE 字节透传给上层
+- [x] Tauri 壳映射 Channel、Axum 壳映射 SSE——同一事件流，两壳只做映射
+- [x] 取消传播（客户端断开 → 上游请求中止）与统一超时语义
+- [x] `local` 路由实现落地：count_tokens 走 gproxy-tokenize 本地阶梯
 - [ ] 真渠道冒烟：非流式、流式、failover 三条路径
 
 验收：从 UI 发一条消息拿到流式回复（临时对话框即可）。

@@ -2,13 +2,85 @@ use guanfu_core::error::ApiError;
 use guanfu_core::services::channels::{
     ChannelDto, ChannelService, CredentialDto, NewChannel, NewCredential,
 };
+use guanfu_core::services::llm::{ChatEvent, CompleteReply, LlmOutput, LlmRequestDto};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingRuleDto, RoutingService};
 use guanfu_core::{AppState, CoreError};
-use tauri::State;
+use tauri::{ipc::Channel, State};
+use tokio_util::sync::CancellationToken;
+
+use crate::ActiveLlmRequests;
 
 fn api_error(error: CoreError) -> ApiError {
     tracing::error!(error = ?error, "core operation failed");
     error.api_error()
+}
+
+#[tauri::command]
+pub async fn execute_llm(
+    state: State<'_, AppState>,
+    active: State<'_, ActiveLlmRequests>,
+    request_id: String,
+    input: LlmRequestDto,
+    on_event: Channel<ChatEvent>,
+) -> Result<Option<CompleteReply>, ApiError> {
+    use futures_util::StreamExt;
+
+    let cancellation = CancellationToken::new();
+    active
+        .0
+        .lock()
+        .expect("active request lock poisoned")
+        .insert(request_id.clone(), cancellation.clone());
+    let execute = state
+        .llm
+        .execute(&state.db, input.try_into().map_err(api_error)?);
+    let output = tokio::select! {
+        result = execute => result.map_err(api_error)?,
+        () = cancellation.cancelled() => {
+            active.0.lock().expect("active request lock poisoned").remove(&request_id);
+            return Ok(None);
+        }
+    };
+    let result = match output {
+        LlmOutput::Complete(reply) => Ok(Some(reply)),
+        LlmOutput::Stream(mut stream) => {
+            loop {
+                let item = tokio::select! {
+                    item = stream.next() => item,
+                    () = cancellation.cancelled() => break,
+                };
+                let Some(item) = item else { break };
+                let event = match item {
+                    Ok(event) => event,
+                    Err(error) => ChatEvent::Error {
+                        error: error.api_error(),
+                    },
+                };
+                if on_event.send(event).is_err() {
+                    break;
+                }
+            }
+            Ok(None)
+        }
+    };
+    active
+        .0
+        .lock()
+        .expect("active request lock poisoned")
+        .remove(&request_id);
+    result
+}
+
+#[tauri::command]
+pub fn cancel_llm(active: State<'_, ActiveLlmRequests>, request_id: String) {
+    if let Some(token) = active
+        .0
+        .lock()
+        .expect("active request lock poisoned")
+        .remove(&request_id)
+    {
+        token.cancel();
+    }
 }
 
 #[tauri::command]

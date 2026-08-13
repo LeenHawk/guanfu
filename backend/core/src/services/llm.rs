@@ -1,9 +1,11 @@
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures_util::StreamExt;
-use gproxy_protocol::OperationKey;
+use eventsource_stream::Eventsource;
+use futures_util::{Stream, StreamExt};
+use gproxy_protocol::{Operation, OperationKey, Provider};
 use gproxy_transform::stream_adapter::SseTransformer;
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
@@ -14,7 +16,34 @@ use crate::llm::client::{ByteStream, CallTarget, LlmClient, LlmReply, LlmRespons
 use crate::llm::pool::{self, FailureKind};
 use crate::llm::routing::{self, RouteDecision};
 use crate::llm::transform::TransformPlan;
+use crate::services::routing::OperationKeyDto;
 use crate::CoreError;
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ts_rs::TS)]
+pub struct LlmRequestDto {
+    pub channel_id: i32,
+    pub operation: OperationKeyDto,
+    pub model: String,
+    pub stream: bool,
+    pub body: Option<serde_json::Value>,
+}
+
+impl TryFrom<LlmRequestDto> for LlmRequest {
+    type Error = CoreError;
+
+    fn try_from(value: LlmRequestDto) -> Result<Self, Self::Error> {
+        Ok(Self {
+            channel_id: value.channel_id,
+            operation: value.operation.try_into()?,
+            model: value.model,
+            stream: value.stream,
+            body: value
+                .body
+                .map(|body| serde_json::to_vec(&body))
+                .transpose()?,
+        })
+    }
+}
 
 pub struct LlmRequest {
     pub channel_id: i32,
@@ -24,6 +53,32 @@ pub struct LlmRequest {
     pub stream: bool,
     /// `operation` 对应 wire 格式的 JSON 请求体；无体操作为 None。
     pub body: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+pub struct CompleteReply {
+    pub status: u16,
+    pub body: serde_json::Value,
+}
+
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatEvent {
+    Frame {
+        event: String,
+        data: serde_json::Value,
+    },
+    Done,
+    Error {
+        error: crate::error::ApiError,
+    },
+}
+
+pub type ChatEventStream = Pin<Box<dyn Stream<Item = Result<ChatEvent, CoreError>> + Send>>;
+
+pub enum LlmOutput {
+    Complete(CompleteReply),
+    Stream(ChatEventStream),
 }
 
 /// LLM 调用服务：加载渠道 → 凭证排序 → 协议转换 → failover 执行。
@@ -55,7 +110,7 @@ impl LlmService {
         &self,
         db: &impl ConnectionTrait,
         req: LlmRequest,
-    ) -> Result<LlmReply, CoreError> {
+    ) -> Result<LlmOutput, CoreError> {
         let ch = channel::Entity::find_by_id(req.channel_id)
             .one(db)
             .await?
@@ -81,9 +136,7 @@ impl LlmService {
                 (target, Some(TransformPlan::plan(source_key, target)?))
             }
             RouteDecision::Local => {
-                return Err(CoreError::UnsupportedRouteImplementation {
-                    implementation: "local",
-                });
+                return execute_local(source_key, &req.model, req.body.as_deref());
             }
             RouteDecision::Unsupported => {
                 return Err(CoreError::UnsupportedRoute {
@@ -142,24 +195,91 @@ impl LlmService {
 }
 
 /// 成功后的响应/流转换（直通时原样返回）。
-fn finish(reply: LlmReply, plan: Option<TransformPlan>) -> Result<LlmReply, CoreError> {
-    let Some(plan) = plan else { return Ok(reply) };
-    match reply {
-        LlmReply::Complete(r) => {
+fn finish(reply: LlmReply, plan: Option<TransformPlan>) -> Result<LlmOutput, CoreError> {
+    let reply = match (reply, plan) {
+        (reply, None) => reply,
+        (LlmReply::Complete(r), Some(plan)) => {
             let body = plan.transform_response(&r.body)?;
-            Ok(LlmReply::Complete(LlmResponse {
+            LlmReply::Complete(LlmResponse {
                 status: r.status,
                 body: Bytes::from(body),
-            }))
+            })
         }
-        LlmReply::Stream { status, stream } => match plan.sse_transformer()? {
-            None => Ok(LlmReply::Stream { status, stream }),
-            Some(t) => Ok(LlmReply::Stream {
+        (LlmReply::Stream { status, stream }, Some(plan)) => match plan.sse_transformer()? {
+            None => LlmReply::Stream { status, stream },
+            Some(transformer) => LlmReply::Stream {
                 status,
-                stream: transform_stream(stream, t),
-            }),
+                stream: transform_stream(stream, transformer),
+            },
         },
+    };
+    match reply {
+        LlmReply::Complete(response) => Ok(LlmOutput::Complete(CompleteReply {
+            status: response.status,
+            body: serde_json::from_slice(&response.body)?,
+        })),
+        LlmReply::Stream { stream, .. } => Ok(LlmOutput::Stream(event_stream(stream))),
     }
+}
+
+fn execute_local(
+    operation: OperationKey,
+    model: &str,
+    body: Option<&[u8]>,
+) -> Result<LlmOutput, CoreError> {
+    if operation.operation() != Operation::CountTokens {
+        return Err(CoreError::UnsupportedRouteImplementation {
+            implementation: "local operation",
+        });
+    }
+    let tokens = crate::llm::count_tokens_local(model, body.unwrap_or_default());
+    let body = match operation.provider_family() {
+        Provider::OpenAi => serde_json::json!({
+            "input_tokens": u32::try_from(tokens).unwrap_or(u32::MAX),
+            "object": "response.input_tokens"
+        }),
+        Provider::Claude => serde_json::json!({ "input_tokens": tokens }),
+        Provider::Gemini => serde_json::json!({
+            "totalTokens": i32::try_from(tokens).unwrap_or(i32::MAX)
+        }),
+        _ => {
+            return Err(CoreError::UnsupportedRouteImplementation {
+                implementation: "local provider",
+            });
+        }
+    };
+    Ok(LlmOutput::Complete(CompleteReply { status: 200, body }))
+}
+
+fn event_stream(inner: ByteStream) -> ChatEventStream {
+    let events = inner.eventsource();
+    Box::pin(futures_util::stream::unfold(
+        (events, false),
+        |(mut events, done)| async move {
+            if done {
+                return None;
+            }
+            match events.next().await {
+                Some(Ok(event)) if event.data == "[DONE]" => {
+                    Some((Ok(ChatEvent::Done), (events, true)))
+                }
+                Some(Ok(event)) => {
+                    let item = serde_json::from_str(&event.data)
+                        .map(|data| ChatEvent::Frame {
+                            event: event.event,
+                            data,
+                        })
+                        .map_err(CoreError::from);
+                    Some((item, (events, false)))
+                }
+                Some(Err(error)) => {
+                    let error = CoreError::Transform(format!("invalid SSE stream: {error}"));
+                    Some((Err(error), (events, true)))
+                }
+                None => Some((Ok(ChatEvent::Done), (events, true))),
+            }
+        },
+    ))
 }
 
 fn transform_stream(inner: ByteStream, transformer: SseTransformer) -> ByteStream {

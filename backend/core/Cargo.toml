@@ -27,6 +27,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["serde"] }
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+eventsource-stream = "0.2"
 tracing = "0.1"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 

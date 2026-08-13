@@ -3,6 +3,9 @@
   .credentials-form {
     grid-template-columns: 1fr 1fr;
   }
+  .invocation-form {
+    grid-template-columns: 1fr 1fr;
+  }
   .management-layout {
     grid-template-columns: 230px minmax(0, 1fr);
   }
@@ -48,7 +51,8 @@
     justify-content: space-between;
   }
   .credentials-form,
-  .route-form {
+  .route-form,
+  .invocation-form {
     grid-template-columns: 1fr;
   }
   .route-row {

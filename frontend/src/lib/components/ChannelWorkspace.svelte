@@ -6,6 +6,7 @@
   import type { RoutingRuleDto } from "$lib/bindings/RoutingRuleDto";
   import { m } from "$lib/paraglide/messages.js";
   import CredentialSection from "$lib/components/CredentialSection.svelte";
+  import InvocationSection from "$lib/components/InvocationSection.svelte";
   import RoutingSection from "$lib/components/RoutingSection.svelte";
 
   let {
@@ -78,4 +79,5 @@
     onput={onputroute}
     onremove={onremoveroute}
   />
+  <InvocationSection {channel} />
 </main>

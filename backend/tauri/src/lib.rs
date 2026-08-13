@@ -1,8 +1,14 @@
 mod commands;
 
 use guanfu_core::{AppConfig, AppState, LlmConfig};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use tauri::Manager;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
+
+#[derive(Default)]
+struct ActiveLlmRequests(Mutex<HashMap<String, CancellationToken>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,6 +28,7 @@ pub fn run() {
                 llm: LlmConfig::default(),
             }))?;
             app.manage(state);
+            app.manage(ActiveLlmRequests::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,6 +42,8 @@ pub fn run() {
             commands::put_routing_rule,
             commands::list_routing_rules,
             commands::remove_routing_rule,
+            commands::execute_llm,
+            commands::cancel_llm,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

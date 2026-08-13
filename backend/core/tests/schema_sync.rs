@@ -2,6 +2,7 @@
 
 use gproxy_protocol::{ContentGenerationKind, Operation, OperationKey};
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
+use guanfu_core::services::llm::{LlmOutput, LlmRequest};
 use guanfu_core::services::routing::{
     OperationKeyDto, PutRoutingRule, RoutingImplementation, RoutingService,
 };
@@ -73,6 +74,39 @@ async fn entity_first_sync_and_crud() {
             target: target.try_into().unwrap()
         }
     );
+
+    let count_source =
+        OperationKey::provider(Operation::CountTokens, gproxy_protocol::Provider::OpenAi);
+    RoutingService::put_rule(
+        &db,
+        PutRoutingRule {
+            channel_id: ch.id,
+            source: count_source.try_into().unwrap(),
+            implementation: RoutingImplementation::Local,
+            sort_order: 1,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    let output = state
+        .llm
+        .execute(
+            &db,
+            LlmRequest {
+                channel_id: ch.id,
+                operation: count_source,
+                model: "gpt-4.1-mini".into(),
+                stream: false,
+                body: Some(br#"{"input":"hello world"}"#.to_vec()),
+            },
+        )
+        .await
+        .unwrap();
+    let LlmOutput::Complete(output) = output else {
+        panic!("local token counting must be complete");
+    };
+    assert!(output.body["input_tokens"].as_u64().unwrap() > 0);
 
     ChannelService::delete_channel(&db, ch.id).await.unwrap();
     assert!(ChannelService::list_channels(&db).await.unwrap().is_empty());
