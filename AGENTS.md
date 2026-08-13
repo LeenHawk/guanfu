@@ -73,7 +73,7 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
 - 多实例：从一开始按「多个观复实例共享同一数据库」设计——跨请求 / 跨实例的状态存库不存进程内存；并发写用原子更新、唯一约束、乐观锁，避免 read-modify-write 竞态；不假设单写者
 - 事务：一个业务操作的多次相关写入放同一事务；数据层函数接收 `&impl ConnectionTrait`，同一份代码兼容普通连接与事务；事务内不等待 LLM / 文件等长外部 IO，跨外部调用的流程状态显式建模（pending / running / failed）
 - 错误处理：core 用结构化错误（thiserror），业务代码不返回 Axum / Tauri 错误类型；对前端只暴露稳定 error code（+ 可选 details），DbErr / reqwest / anyhow 的原始字符串只进日志；用户可见文案由前端按 code 走 i18n；anyhow 仅限应用入口与启动流程
-- LLM 协议层用 gproxy-protocol / gproxy-transform / gproxy-tokenize（本项目用户是其作者），出站 HTTP 用 reqwest
+- LLM 协议层用 gproxy-protocol / gproxy-transform / gproxy-tokenize，出站 HTTP 用 reqwest
 - 遇到疑似 gproxy 协议层 bug：不要在本仓库悄悄绕过，向用户提出，并到 https://github.com/LeenHawk/gproxy 提 issue
 - LLM 流式：生成、流式解析、工具调用编排只在 core 实现；core 对外暴露传输无关的流式事件 enum（如 ChatEvent），Tauri 壳映射为 Channel、Axum 壳映射为 SSE——不许两个壳各写一套生成逻辑，层间不传未定义的 JSON Value / 字符串协议
 - 取消与超时：客户端断开 / 取消要向下传播，不让上游模型调用继续空跑；所有外部网络请求必须有明确 timeout，禁止无限等待
