@@ -9,6 +9,7 @@
 //! 凭证排序与失败分类见 [`pool`]，failover 执行在 `services::llm`。
 
 pub mod client;
+pub mod codec;
 pub mod ir;
 pub mod pool;
 pub mod routing;

@@ -35,6 +35,18 @@ pub enum CoreError {
     #[error("routing implementation {implementation} is not executable yet")]
     UnsupportedRouteImplementation { implementation: &'static str },
 
+    #[error("target {target:?} does not support semantic capability {capability:?}")]
+    UnsupportedCapability {
+        capability: crate::llm::ir::Capability,
+        target: gproxy_protocol::OperationKey,
+    },
+
+    #[error("unmodeled provider event for {target:?}: {event}")]
+    UnmodeledProviderEvent {
+        target: gproxy_protocol::OperationKey,
+        event: String,
+    },
+
     #[error("upstream returned status {status}")]
     Upstream { status: u16, body: String },
 }
@@ -49,6 +61,7 @@ pub enum ErrorCode {
     ChannelNotFound,
     NoUsableCredential,
     UnsupportedRoute,
+    UnsupportedCapability,
     UpstreamRejected,
 }
 
@@ -83,6 +96,11 @@ impl CoreError {
                 Some(json!({ "channel_id": channel_id, "operation": operation })),
             ),
             Self::UnsupportedRouteImplementation { .. } => (ErrorCode::UnsupportedRoute, None),
+            Self::UnsupportedCapability { capability, .. } => (
+                ErrorCode::UnsupportedCapability,
+                Some(json!({ "capability": capability })),
+            ),
+            Self::UnmodeledProviderEvent { .. } => (ErrorCode::InvalidData, None),
             Self::Upstream { status, .. } => (
                 ErrorCode::UpstreamRejected,
                 Some(json!({ "status": status })),

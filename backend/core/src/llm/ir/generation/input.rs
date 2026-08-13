@@ -82,7 +82,22 @@ pub enum FileSource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {
     pub call_id: ToolCallId,
+    pub kind: ToolResultKind,
     pub outcome: ToolOutcome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolResultKind {
+    Function,
+    Custom,
+    ComputerUse,
+    CodeExecution,
+    Shell,
+    TextEditor,
+    Mcp,
+    Memory,
+    ToolSearch,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

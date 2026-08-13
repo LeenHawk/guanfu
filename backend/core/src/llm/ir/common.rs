@@ -64,6 +64,22 @@ pub enum Capability {
     McpTool,
     MemoryTool,
     ToolSearchTool,
+    ModelCatalog,
+    TokenCounting,
+    Embeddings,
+    ImageGeneration,
+    ImageEditing,
+    Speech,
+    Transcription,
+    Translation,
+    WebSearch,
+    Rerank,
+    Compaction,
+    Conversation,
+    Realtime,
+    TopKSampling,
+    SeededSampling,
+    StopSequences,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

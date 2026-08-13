@@ -75,6 +75,7 @@ pub enum GenerateDelta {
     Transcript(ContentTextDelta),
     Image(ImageDelta),
     Citation(CitationDelta),
+    ToolExecution(ToolExecutionDelta),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +124,13 @@ pub struct CitationDelta {
     pub output_index: u32,
     pub content_index: u32,
     pub citation: Citation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolExecutionDelta {
+    pub output_index: u32,
+    pub output_id: OutputId,
+    pub state: super::ToolExecutionState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
