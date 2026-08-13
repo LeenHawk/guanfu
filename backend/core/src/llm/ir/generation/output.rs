@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::ir::{GenerationId, MediaSource, ModelId, OutputId, ToolCallId, Usage};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct GenerateResponse {
     pub id: GenerationId,
     pub model: ModelId,
@@ -11,8 +11,8 @@ pub struct GenerateResponse {
     pub usage: Usage,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "type", content = "item", rename_all = "snake_case")]
 pub enum OutputItem {
     Message(OutputMessage),
     Reasoning(ReasoningOutput),
@@ -35,13 +35,13 @@ impl OutputItem {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct OutputMessage {
     pub id: OutputId,
     pub content: Vec<OutputContent>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputContent {
     Text {
@@ -53,7 +53,7 @@ pub enum OutputContent {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Citation {
     pub start: u64,
     pub end: u64,
@@ -61,7 +61,7 @@ pub struct Citation {
     pub title: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CitationSource {
     Url { url: String },
@@ -69,7 +69,7 @@ pub enum CitationSource {
     Document { document_id: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ReasoningOutput {
     pub id: OutputId,
     pub summary: Vec<String>,
@@ -77,7 +77,7 @@ pub struct ReasoningOutput {
     pub signature: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolCall {
     Function(FunctionCall),
@@ -113,7 +113,7 @@ impl ToolCall {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct FunctionCall {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -121,7 +121,7 @@ pub struct FunctionCall {
     pub arguments: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CustomToolCall {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -129,7 +129,7 @@ pub struct CustomToolCall {
     pub input: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct HostedToolCall {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -137,7 +137,7 @@ pub struct HostedToolCall {
     pub input: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ComputerActionCall {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -146,7 +146,7 @@ pub struct ComputerActionCall {
 
 macro_rules! json_call {
     ($name:ident) => {
-        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
         pub struct $name {
             pub id: OutputId,
             pub call_id: ToolCallId,
@@ -162,7 +162,7 @@ json_call!(ImageGenerationCall);
 json_call!(MemoryCall);
 json_call!(ToolSearchCall);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct McpCall {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -171,7 +171,7 @@ pub struct McpCall {
     pub arguments: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ToolExecution {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -180,7 +180,7 @@ pub struct ToolExecution {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolExecutionState {
     Running,
@@ -188,21 +188,21 @@ pub enum ToolExecutionState {
     Failed,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImageArtifact {
     pub id: OutputId,
     pub source: MediaSource,
     pub revised_prompt: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct AudioArtifact {
     pub id: OutputId,
     pub source: MediaSource,
     pub transcript: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
     Stop,

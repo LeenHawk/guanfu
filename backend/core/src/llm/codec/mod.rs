@@ -14,8 +14,8 @@ use crate::CoreError;
 pub type SemanticEventStream =
     Pin<Box<dyn Stream<Item = Result<OperationEvent, CoreError>> + Send>>;
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[serde(tag = "operation", content = "event", rename_all = "snake_case")]
 pub enum OperationEvent {
     Generate(GenerateEvent),
     Image(crate::llm::ir::images::ImageEvent),

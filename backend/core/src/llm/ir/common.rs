@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 macro_rules! string_id {
     ($name:ident) => {
-        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+        #[ts(as = "String")]
         pub struct $name(pub String);
     };
 }
@@ -18,22 +18,30 @@ string_id!(ContentId);
 string_id!(ToolCallId);
 string_id!(FileId);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct MediaType(pub String);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MediaSource {
-    Url { url: String },
-    Data { media_type: MediaType, bytes: Bytes },
-    File { id: FileId },
+    Url {
+        url: String,
+    },
+    Data {
+        media_type: MediaType,
+        #[ts(type = "number[]")]
+        bytes: Bytes,
+    },
+    File {
+        id: FileId,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(as = "serde_json::Value")]
 pub struct JsonSchema(pub serde_json::Value);
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -42,7 +50,7 @@ pub struct Usage {
     pub total_tokens: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     TextGeneration,
@@ -82,7 +90,7 @@ pub enum Capability {
     StopSequences,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct OperationFailure {
     pub code: String,
     pub message: String,

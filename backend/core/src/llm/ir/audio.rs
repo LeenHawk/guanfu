@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{MediaSource, ModelId, OperationFailure, Usage};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AudioRequest {
     Speech(SpeechRequest),
@@ -10,7 +10,7 @@ pub enum AudioRequest {
     Translate(TranslationRequest),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SpeechRequest {
     pub model: ModelId,
     pub input: String,
@@ -21,10 +21,10 @@ pub struct SpeechRequest {
     pub mode: SpeechMode,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Voice(pub String);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioFormat {
     Mp3,
@@ -48,14 +48,14 @@ impl AudioFormat {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SpeechMode {
     Complete,
     Stream,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct TranscriptionRequest {
     pub model: ModelId,
     pub audio: MediaSource,
@@ -67,26 +67,26 @@ pub struct TranscriptionRequest {
     pub mode: TranscriptionMode,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TimestampGranularity {
     Word,
     Segment,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct DiarizationConfig {
     pub known_speakers: Vec<KnownSpeaker>,
     pub chunking: Option<AudioChunking>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct KnownSpeaker {
     pub name: String,
     pub reference: Option<MediaSource>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AudioChunking {
     Auto,
@@ -97,14 +97,14 @@ pub enum AudioChunking {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionMode {
     Complete,
     Stream,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct TranslationRequest {
     pub model: ModelId,
     pub audio: MediaSource,
@@ -112,7 +112,7 @@ pub struct TranslationRequest {
     pub temperature: Option<f32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AudioResponse {
     Speech(AudioArtifact),
@@ -120,13 +120,14 @@ pub enum AudioResponse {
     Translation(Translation),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct AudioArtifact {
     pub media_type: String,
+    #[ts(type = "number[]")]
     pub bytes: bytes::Bytes,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Transcription {
     pub text: String,
     pub language: Option<String>,
@@ -136,7 +137,7 @@ pub struct Transcription {
     pub usage: Option<AudioUsage>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Translation {
     pub text: String,
     pub source_language: Option<String>,
@@ -144,7 +145,7 @@ pub struct Translation {
     pub segments: Vec<TranscriptSegment>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct TranscriptWord {
     pub text: String,
     pub start_seconds: f64,
@@ -152,7 +153,7 @@ pub struct TranscriptWord {
     pub speaker: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct TranscriptSegment {
     pub id: String,
     pub text: String,
@@ -161,23 +162,28 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AudioUsage {
     Tokens(Usage),
     Duration { seconds: f64 },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SpeechEvent {
-    Started { media_type: String },
-    AudioDelta { bytes: bytes::Bytes },
+    Started {
+        media_type: String,
+    },
+    AudioDelta {
+        #[ts(type = "number[]")]
+        bytes: bytes::Bytes,
+    },
     Finished,
     Failed(OperationFailure),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TranscriptionEvent {
     Started,

@@ -2,21 +2,21 @@ use serde::{Deserialize, Serialize};
 
 use super::{MediaSource, ModelId, OperationFailure, OutputId, Usage};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageRequest {
     Generate(GenerateImageRequest),
     Edit(EditImageRequest),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageMode {
     Complete,
     Stream,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct GenerateImageRequest {
     pub model: ModelId,
     pub prompt: String,
@@ -25,7 +25,7 @@ pub struct GenerateImageRequest {
     pub mode: ImageMode,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct EditImageRequest {
     pub model: ModelId,
     pub prompt: String,
@@ -37,7 +37,7 @@ pub struct EditImageRequest {
     pub mode: ImageMode,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImageOptions {
     pub width: Option<u32>,
     pub height: Option<u32>,
@@ -49,7 +49,7 @@ pub struct ImageOptions {
     pub partial_images: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageQuality {
     Low,
@@ -58,7 +58,7 @@ pub enum ImageQuality {
     Auto,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageBackground {
     Transparent,
@@ -66,7 +66,7 @@ pub enum ImageBackground {
     Auto,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageFormat {
     Png,
@@ -74,34 +74,34 @@ pub enum ImageFormat {
     Webp,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageModeration {
     Low,
     Auto,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageInputFidelity {
     Low,
     High,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImageResponse {
     pub images: Vec<ImageArtifact>,
     pub usage: Option<Usage>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImageArtifact {
     pub id: OutputId,
     pub source: MediaSource,
     pub revised_prompt: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageEvent {
     Started,
@@ -111,14 +111,14 @@ pub enum ImageEvent {
     Failed(OperationFailure),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImagePreview {
     pub index: u32,
     pub sequence: u32,
     pub image: ImageArtifact,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImageProgress {
     pub completed: u32,
     pub total: Option<u32>,

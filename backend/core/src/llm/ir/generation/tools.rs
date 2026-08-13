@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::ir::{JsonSchema, MediaSource};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolDefinition {
     Function(FunctionTool),
@@ -20,7 +20,7 @@ pub enum ToolDefinition {
     ToolSearch(ToolSearchTool),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct FunctionTool {
     pub name: String,
     pub description: Option<String>,
@@ -28,14 +28,14 @@ pub struct FunctionTool {
     pub strict: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CustomTool {
     pub name: String,
     pub description: Option<String>,
     pub input_format: CustomToolInputFormat,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CustomToolInputFormat {
     Text,
@@ -45,14 +45,14 @@ pub enum CustomToolInputFormat {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum GrammarSyntax {
     Lark,
     Regex,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct WebSearchTool {
     pub search_context_size: Option<SearchContextSize>,
     pub user_location: Option<UserLocation>,
@@ -61,7 +61,7 @@ pub struct WebSearchTool {
     pub max_uses: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchContextSize {
     Low,
@@ -69,7 +69,7 @@ pub enum SearchContextSize {
     High,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct UserLocation {
     pub city: Option<String>,
     pub region: Option<String>,
@@ -79,14 +79,14 @@ pub struct UserLocation {
     pub longitude: Option<f64>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct WebFetchTool {
     pub allowed_domains: Vec<String>,
     pub blocked_domains: Vec<String>,
     pub max_uses: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct FileSearchTool {
     pub vector_store_ids: Vec<String>,
     pub max_results: Option<u32>,
@@ -94,20 +94,20 @@ pub struct FileSearchTool {
     pub filters: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct FileSearchRanking {
     pub ranker: Option<String>,
     pub score_threshold: Option<f32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ComputerUseTool {
     pub environment: ComputerEnvironment,
     pub display_width: u32,
     pub display_height: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ComputerEnvironment {
     Browser,
@@ -116,22 +116,22 @@ pub enum ComputerEnvironment {
     Linux,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CodeExecutionTool {
     pub container: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ShellTool {
     pub environment: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct TextEditorTool {
     pub max_characters: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ImageGenerationTool {
     pub size: Option<String>,
     pub quality: Option<String>,
@@ -139,7 +139,7 @@ pub struct ImageGenerationTool {
     pub output_format: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct McpTool {
     pub server_label: String,
     pub server_url: String,
@@ -147,7 +147,7 @@ pub struct McpTool {
     pub approval: McpApproval,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum McpApproval {
     Always,
@@ -155,17 +155,17 @@ pub enum McpApproval {
     PerTool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct MemoryTool {
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ToolSearchTool {
     pub deferred_tools: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolChoice {
     Auto,
@@ -180,14 +180,14 @@ pub enum ToolChoice {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum AllowedToolMode {
     Auto,
     Required,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputConstraint {
     Text,
@@ -199,7 +199,7 @@ pub enum OutputConstraint {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolResultContent {
     Text { text: String },
@@ -207,7 +207,7 @@ pub enum ToolResultContent {
     Json { value: serde_json::Value },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolOutcome {
     Success {

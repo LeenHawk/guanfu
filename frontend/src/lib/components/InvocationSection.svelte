@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { ChatEvent } from "$lib/bindings/ChatEvent";
+  import type { OperationResponse } from "$lib/bindings/OperationResponse";
+  import type { SemanticStreamMessage } from "$lib/bindings/SemanticStreamMessage";
   import type { ChannelDto } from "$lib/bindings/ChannelDto";
   import { executeLlm } from "$lib/api/llm";
   import { m } from "$lib/paraglide/messages.js";
@@ -11,11 +12,31 @@
   let running = $state(false);
   let controller: AbortController | null = null;
 
-  function append(event: ChatEvent) {
-    if (event.type === "frame") {
-      result += `${event.event}\n${JSON.stringify(event.data, null, 2)}\n\n`;
+  function append(message: SemanticStreamMessage) {
+    if (message.type === "error") {
+      result += `${message.error.code}\n`;
+      return;
     }
-    if (event.type === "error") result += `${event.error.code}\n`;
+    const operationEvent = message.event;
+    if (operationEvent.operation !== "generate") return;
+    const event = operationEvent.event;
+    if (event.type === "delta") {
+      const delta = event.data;
+      if (delta.type === "text" || delta.type === "refusal") {
+        result += delta.data.delta;
+      }
+    }
+  }
+
+  function completeText(response: OperationResponse): string {
+    if (response.operation !== "generate")
+      return JSON.stringify(response, null, 2);
+    return response.response.output
+      .filter((item) => item.type === "message")
+      .flatMap((item) => item.item.content)
+      .filter((content) => content.type === "text")
+      .map((content) => content.text)
+      .join("");
   }
 
   async function submit(event: SubmitEvent) {
@@ -27,18 +48,40 @@
       const reply = await executeLlm(
         {
           channel_id: channel.id,
-          operation: {
-            operation: "stream_generate_content",
-            kind: "open_ai_responses",
+          request: {
+            operation: "generate",
+            request: {
+              model,
+              input: [
+                {
+                  type: "message",
+                  message: {
+                    role: "user",
+                    content: [{ type: "text", text: prompt }],
+                  },
+                },
+              ],
+              instructions: [],
+              tools: [],
+              tool_choice: { type: "auto" },
+              output: { type: "text" },
+              sampling: {
+                temperature: null,
+                top_p: null,
+                top_k: null,
+                seed: null,
+                stop: [],
+              },
+              limits: { max_output_tokens: null, max_tool_calls: null },
+              modalities: ["text"],
+              mode: "stream",
+            },
           },
-          model,
-          stream: true,
-          body: { model, input: prompt, stream: true },
         },
         append,
         controller.signal,
       );
-      if (reply) result = JSON.stringify(reply.body, null, 2);
+      if (reply) result = completeText(reply);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         result = error instanceof Error ? error.message : String(error);

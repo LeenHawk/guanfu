@@ -12,14 +12,14 @@ use serde::{Deserialize, Serialize};
 
 use super::ModelId;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum GenerateMode {
     Complete,
     Stream,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct GenerateRequest {
     pub model: ModelId,
     pub input: Vec<InputItem>,
@@ -33,7 +33,7 @@ pub struct GenerateRequest {
     pub mode: GenerateMode,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SamplingOptions {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -42,13 +42,13 @@ pub struct SamplingOptions {
     pub stop: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct GenerationLimits {
     pub max_output_tokens: Option<u64>,
     pub max_tool_calls: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputModality {
     Text,

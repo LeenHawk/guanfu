@@ -10,8 +10,8 @@ use super::search::{SearchRequest, SearchResponse};
 use super::tokens::{CountTokensRequest, CountTokensResponse};
 use gproxy_protocol::Operation;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "operation", content = "request", rename_all = "snake_case")]
 pub enum OperationRequest {
     Models(ModelRequest),
     CountTokens(CountTokensRequest),
@@ -23,8 +23,8 @@ pub enum OperationRequest {
     Platform(PlatformRequest),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "operation", content = "response", rename_all = "snake_case")]
 pub enum OperationResponse {
     Models(ModelResponse),
     CountTokens(CountTokensResponse),

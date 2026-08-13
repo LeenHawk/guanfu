@@ -17,13 +17,13 @@ use crate::llm::routing::{self, RouteDecision};
 use crate::llm::wire::WireResult;
 use crate::CoreError;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
 pub struct SemanticLlmRequest {
     pub channel_id: i32,
     pub request: OperationRequest,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SemanticStreamMessage {
     Event { event: OperationEvent },

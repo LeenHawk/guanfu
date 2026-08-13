@@ -10,7 +10,7 @@
     "check": "pnpm --filter frontend check",
     "lint": "pnpm --filter frontend lint",
     "format": "pnpm --filter frontend format",
-    "gen:bindings": "cd backend && TS_RS_EXPORT_DIR=../frontend/src/lib/bindings cargo run -p guanfu-core --bin export_bindings && cd .. && pnpm --filter frontend exec prettier --write src/lib/bindings",
+    "gen:bindings": "cd backend && TS_RS_EXPORT_DIR=../frontend/src/lib/bindings TS_RS_LARGE_INT=number cargo run -p guanfu-core --bin export_bindings && cd .. && pnpm --filter frontend exec prettier --write src/lib/bindings",
     "tauri": "tauri"
   },
   "license": "MIT",

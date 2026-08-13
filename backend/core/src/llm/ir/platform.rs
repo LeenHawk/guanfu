@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::generation::{GenerateRequest, InputItem, Instruction, OutputItem};
 use super::{ModelId, Usage};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PlatformRequest {
     Compact(CompactRequest),
@@ -12,7 +12,7 @@ pub enum PlatformRequest {
     ConnectRealtime(ConnectRealtimeRequest),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CompactRequest {
     pub model: ModelId,
     pub input: Vec<InputItem>,
@@ -20,25 +20,25 @@ pub struct CompactRequest {
     pub max_output_tokens: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CreateConversationRequest {
     pub items: Vec<InputItem>,
     pub metadata: std::collections::BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CreateRealtimeCallRequest {
     pub session: RealtimeSession,
     pub offer_sdp: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ConnectRealtimeRequest {
     pub model: ModelId,
     pub session: RealtimeSession,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RealtimeSession {
     pub model: ModelId,
     pub instructions: Vec<Instruction>,
@@ -50,14 +50,14 @@ pub struct RealtimeSession {
     pub generation: Option<Box<GenerateRequest>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeModality {
     Text,
     Audio,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnDetection {
     ServerVad {
@@ -70,7 +70,7 @@ pub enum TurnDetection {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticVadEagerness {
     Low,
@@ -79,7 +79,7 @@ pub enum SemanticVadEagerness {
     Auto,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PlatformResponse {
     Compact(CompactResponse),
@@ -87,21 +87,21 @@ pub enum PlatformResponse {
     RealtimeCall(RealtimeCall),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CompactResponse {
     pub output: Vec<OutputItem>,
     pub encrypted_content: Option<String>,
     pub usage: Option<Usage>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Conversation {
     pub id: String,
     pub items: Vec<OutputItem>,
     pub metadata: std::collections::BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RealtimeCall {
     pub id: String,
     pub answer_sdp: String,

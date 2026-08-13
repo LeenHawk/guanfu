@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use super::{ModelId, Usage};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SearchRequest {
     Web(WebSearchRequest),
     Rerank(RerankRequest),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct WebSearchRequest {
     pub model: Option<ModelId>,
     pub query: String,
@@ -19,7 +19,7 @@ pub struct WebSearchRequest {
     pub location: Option<SearchLocation>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SearchLocation {
     pub city: Option<String>,
     pub region: Option<String>,
@@ -29,7 +29,7 @@ pub struct SearchLocation {
     pub longitude: Option<f64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RerankRequest {
     pub model: ModelId,
     pub query: String,
@@ -38,27 +38,27 @@ pub struct RerankRequest {
     pub return_documents: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RerankDocument {
     pub id: Option<String>,
     pub text: String,
     pub title: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SearchResponse {
     Web(WebSearchResponse),
     Rerank(RerankResponse),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct WebSearchResponse {
     pub results: Vec<WebSearchResult>,
     pub usage: Option<Usage>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct WebSearchResult {
     pub url: String,
     pub title: String,
@@ -67,13 +67,13 @@ pub struct WebSearchResult {
     pub score: Option<f32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RerankResponse {
     pub results: Vec<RerankResult>,
     pub usage: Option<Usage>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RerankResult {
     pub index: u32,
     pub relevance_score: f32,

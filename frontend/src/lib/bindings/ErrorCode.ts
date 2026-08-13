@@ -8,4 +8,5 @@ export type ErrorCode =
   | "channel_not_found"
   | "no_usable_credential"
   | "unsupported_route"
+  | "unsupported_capability"
   | "upstream_rejected";
