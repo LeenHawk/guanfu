@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sea-orm = { version = "2.0", default-features = false, features = [
+sea-orm = { version = "2", default-features = false, features = [
   "sqlx-sqlite",
   "runtime-tokio-rustls",
   "macros",
@@ -12,9 +12,9 @@ sea-orm = { version = "2.0", default-features = false, features = [
   "schema-sync",
   "with-time",
 ] }
-gproxy-protocol = "2.5"
-gproxy-transform = "2.5"
-gproxy-tokenize = { version = "2.5", features = ["tiktoken"] }
+gproxy-protocol = "2"
+gproxy-transform = "2"
+gproxy-tokenize = { version = "2", features = ["tiktoken"] }
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
   "stream",
