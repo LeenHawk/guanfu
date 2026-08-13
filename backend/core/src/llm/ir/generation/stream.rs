@@ -149,7 +149,7 @@ pub struct OutputFinished {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct GenerationFinished {
     pub finish: FinishReason,
-    pub usage: Usage,
+    pub usage: Option<Usage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]

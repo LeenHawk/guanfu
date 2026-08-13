@@ -115,13 +115,13 @@ pub struct TranslationRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AudioResponse {
-    Speech(AudioArtifact),
+    Speech(SpeechArtifact),
     Transcription(Transcription),
     Translation(Translation),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-pub struct AudioArtifact {
+pub struct SpeechArtifact {
     pub media_type: String,
     #[ts(type = "number[]")]
     pub bytes: bytes::Bytes,

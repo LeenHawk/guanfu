@@ -8,7 +8,7 @@ pub struct GenerateResponse {
     pub model: ModelId,
     pub output: Vec<OutputItem>,
     pub finish: FinishReason,
-    pub usage: Usage,
+    pub usage: Option<Usage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]

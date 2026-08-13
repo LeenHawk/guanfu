@@ -2,4 +2,4 @@
 import type { FinishReason } from "./FinishReason";
 import type { Usage } from "./Usage";
 
-export type GenerationFinished = { finish: FinishReason; usage: Usage };
+export type GenerationFinished = { finish: FinishReason; usage: Usage | null };

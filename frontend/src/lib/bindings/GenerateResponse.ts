@@ -10,5 +10,5 @@ export type GenerateResponse = {
   model: ModelId;
   output: Array<OutputItem>;
   finish: FinishReason;
-  usage: Usage;
+  usage: Usage | null;
 };
