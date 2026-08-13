@@ -81,6 +81,7 @@ pub enum MultipartValue {
 pub enum ResponseMode {
     Json,
     Binary,
+    BinaryStream,
     JsonSse,
 }
 
@@ -98,6 +99,7 @@ pub enum WireResult {
 pub enum WireResponse {
     Json(JsonResponse),
     Binary(BinaryResponse),
+    BinaryStream(BinaryStreamResponse),
     JsonSse(JsonSseResponse),
 }
 
@@ -112,6 +114,12 @@ pub struct BinaryResponse {
     pub metadata: ResponseMetadata,
     pub content_type: Option<String>,
     pub body: Bytes,
+}
+
+pub struct BinaryStreamResponse {
+    pub metadata: ResponseMetadata,
+    pub content_type: Option<String>,
+    pub stream: ByteStream,
 }
 
 pub struct JsonSseResponse {

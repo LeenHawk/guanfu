@@ -1,6 +1,6 @@
 use base64::Engine;
 use bytes::Bytes;
-use gproxy_protocol::{OperationKey, Provider};
+use gproxy_protocol::{Operation, OperationKey, Provider};
 use gproxy_transform::{dispatch, resolve, TransformContext};
 use http::HeaderMap;
 use serde_json::{json, Value};
@@ -21,6 +21,11 @@ use crate::llm::wire::{
 use crate::CoreError;
 
 pub fn encode(request: &OperationRequest, target: OperationKey) -> Result<WireRequest, CoreError> {
+    if let OperationRequest::Embeddings(request) = request {
+        if request.task.is_some() && target.provider_family() != Provider::Gemini {
+            return Err(unsupported(Capability::Embeddings, target));
+        }
+    }
     let (canonical, body, query, response_mode) = canonical_request(request)?;
     let endpoint = gproxy_protocol::endpoint::request_target(
         target,
@@ -28,7 +33,12 @@ pub fn encode(request: &OperationRequest, target: OperationKey) -> Result<WireRe
         is_stream(request),
     )
     .map_err(|error| CoreError::Endpoint(error.to_string()))?;
-    let (body, mut query) = transform_request(canonical, target, body, query)?;
+    let (body, mut query) = match request {
+        OperationRequest::Embeddings(request) if target.provider_family() == Provider::Gemini => {
+            (encode_gemini_embedding(request, target)?, Vec::new())
+        }
+        _ => transform_request(canonical, target, body, query)?,
+    };
     if let OperationRequest::Models(ModelRequest::List(request)) = request {
         query = model_query(request, target.provider_family());
     }
@@ -65,10 +75,21 @@ pub fn decode(
                 bytes: response.body,
             }),
         ))),
+        (
+            OperationRequest::Audio(AudioRequest::Speech(request)),
+            WireResponse::BinaryStream(response),
+        ) => decode_speech_stream(request, response),
         (OperationRequest::Audio(AudioRequest::Speech(_)), _) => Err(mode_error()),
         (_, WireResponse::Json(response)) => {
-            let body = transform_response(target, canonical, response.body)?;
-            Ok(DecodedResponse::Complete(decode_json(request, &body)?))
+            let body = transform_response(
+                target,
+                canonical,
+                response.body,
+                request_capability(request.operation()),
+            )?;
+            Ok(DecodedResponse::Complete(decode_json(
+                request, canonical, &body,
+            )?))
         }
         (OperationRequest::Images(image_request), WireResponse::JsonSse(response)) => {
             decode_image_stream(image_request, target, response.stream)
@@ -171,18 +192,16 @@ fn canonical_request(
             Vec::new(),
             mode(request.mode),
         ),
-        OperationRequest::Audio(AudioRequest::Speech(request)) => {
-            if request.mode == SpeechMode::Stream {
-                return Err(unsupported(Capability::Speech, key));
-            }
-            (
-                json_body(
-                    json!({"model":request.model.0,"input":request.input,"voice":request.voice.0,"instructions":request.instructions,"response_format":enum_string(Some(request.format)),"speed":request.speed}),
-                )?,
-                Vec::new(),
-                ResponseMode::Binary,
-            )
-        }
+        OperationRequest::Audio(AudioRequest::Speech(request)) => (
+            json_body(
+                json!({"model":request.model.0,"input":request.input,"voice":request.voice.0,"instructions":request.instructions,"response_format":enum_string(Some(request.format)),"speed":request.speed}),
+            )?,
+            Vec::new(),
+            match request.mode {
+                SpeechMode::Complete => ResponseMode::Binary,
+                SpeechMode::Stream => ResponseMode::BinaryStream,
+            },
+        ),
         OperationRequest::Audio(AudioRequest::Transcribe(request)) => (
             RequestBody::Empty,
             Vec::new(),
@@ -222,14 +241,9 @@ fn canonical_request(
             Vec::new(),
             ResponseMode::Json,
         ),
-        OperationRequest::Platform(PlatformRequest::CreateRealtimeCall(request)) => (
-            json_body(json!({"session":request.session,"sdp":request.offer_sdp}))?,
-            Vec::new(),
-            ResponseMode::Json,
-        ),
-        OperationRequest::Platform(PlatformRequest::ConnectRealtime(_)) => {
-            return Err(unsupported(Capability::Realtime, key))
-        }
+        OperationRequest::Platform(
+            PlatformRequest::CreateRealtimeCall(_) | PlatformRequest::ConnectRealtime(_),
+        ) => return Err(unsupported(Capability::Realtime, key)),
         OperationRequest::Generate(_) => unreachable!("generation codec handles generation"),
     };
     Ok((key, result.0, result.1, result.2))
@@ -251,6 +265,36 @@ fn prepare_body(
         OperationRequest::Audio(AudioRequest::Translate(request)) => translation_multipart(request),
         _ => Ok(transformed),
     }
+}
+
+fn encode_gemini_embedding(
+    request: &EmbeddingRequest,
+    target: OperationKey,
+) -> Result<RequestBody, CoreError> {
+    let text = match &request.input {
+        EmbeddingInput::Text { value } => value,
+        EmbeddingInput::TextBatch { .. }
+        | EmbeddingInput::Tokens { .. }
+        | EmbeddingInput::TokenBatch { .. } => {
+            return Err(unsupported(Capability::Embeddings, target))
+        }
+    };
+    let task_type = request.task.map(|task| match task {
+        EmbeddingTask::RetrievalQuery => "RETRIEVAL_QUERY",
+        EmbeddingTask::RetrievalDocument => "RETRIEVAL_DOCUMENT",
+        EmbeddingTask::SemanticSimilarity => "SEMANTIC_SIMILARITY",
+        EmbeddingTask::Classification => "CLASSIFICATION",
+        EmbeddingTask::Clustering => "CLUSTERING",
+        EmbeddingTask::QuestionAnswering => "QUESTION_ANSWERING",
+        EmbeddingTask::FactVerification => "FACT_VERIFICATION",
+        EmbeddingTask::CodeRetrievalQuery => "CODE_RETRIEVAL_QUERY",
+    });
+    json_body(json!({
+        "model": request.model.0,
+        "content": {"parts": [{"text": text}]},
+        "taskType": task_type,
+        "outputDimensionality": request.dimensions,
+    }))
 }
 
 fn image_edit_multipart(request: &EditImageRequest) -> Result<RequestBody, CoreError> {
@@ -332,7 +376,11 @@ fn transform_request(
         RequestBody::Json(body) => {
             let output = dispatch::request_bytes_detailed(pair, &ctx, body.as_bytes())
                 .map_err(transform_error)?;
-            strict(output.diagnostics, target)?;
+            strict(
+                output.diagnostics,
+                target,
+                request_capability(source.operation()),
+            )?;
             RequestBody::Json(JsonBody::from_bytes(Bytes::from(output.value))?)
         }
         RequestBody::Empty => RequestBody::Empty,
@@ -354,6 +402,7 @@ fn transform_response(
     source: OperationKey,
     target: OperationKey,
     body: JsonBody,
+    capability: Capability,
 ) -> Result<JsonBody, CoreError> {
     if source == target {
         return Ok(body);
@@ -362,25 +411,23 @@ fn transform_response(
     let ctx = TransformContext::new(source, target);
     let output =
         dispatch::response_bytes_detailed(pair, &ctx, body.as_bytes()).map_err(transform_error)?;
-    strict(output.diagnostics, target)?;
+    strict(output.diagnostics, target, capability)?;
     JsonBody::from_bytes(Bytes::from(output.value))
 }
 
 fn decode_json(
     request: &OperationRequest,
+    target: OperationKey,
     body: &JsonBody,
 ) -> Result<OperationResponse, CoreError> {
     let value: Value = body.decode()?;
     Ok(match request {
         OperationRequest::Models(ModelRequest::List(_)) => {
             OperationResponse::Models(ModelResponse::List(ModelPage {
-                models: value
-                    .get("data")
-                    .and_then(Value::as_array)
-                    .unwrap_or(&vec![])
+                models: array_field(&value, "data", target)?
                     .iter()
-                    .map(decode_model)
-                    .collect(),
+                    .map(|model| decode_model(model, target))
+                    .collect::<Result<_, _>>()?,
                 next_cursor: value
                     .get("next_cursor")
                     .and_then(Value::as_str)
@@ -388,270 +435,277 @@ fn decode_json(
             }))
         }
         OperationRequest::Models(ModelRequest::Get(_)) => {
-            OperationResponse::Models(ModelResponse::One(decode_model(&value)))
+            OperationResponse::Models(ModelResponse::One(decode_model(&value, target)?))
         }
         OperationRequest::CountTokens(_) => OperationResponse::CountTokens(CountTokensResponse {
-            input_tokens: value
-                .get("input_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
+            input_tokens: required_u64(&value, "input_tokens", target)?,
         }),
         OperationRequest::Embeddings(_) => OperationResponse::Embeddings(EmbeddingResponse {
             model: value
                 .get("model")
                 .and_then(Value::as_str)
                 .map(|v| ModelId(v.into())),
-            vectors: value
-                .get("data")
-                .and_then(Value::as_array)
-                .unwrap_or(&vec![])
+            vectors: array_field(&value, "data", target)?
                 .iter()
-                .map(|item| EmbeddingVector {
-                    index: item
-                        .get("index")
-                        .and_then(Value::as_u64)
-                        .and_then(|v| u32::try_from(v).ok())
-                        .unwrap_or(0),
-                    values: item
-                        .get("embedding")
-                        .and_then(Value::as_array)
-                        .unwrap_or(&vec![])
-                        .iter()
-                        .filter_map(Value::as_f64)
-                        .map(|v| v as f32)
-                        .collect(),
+                .map(|item| {
+                    Ok(EmbeddingVector {
+                        index: required_u32(item, "index", target)?,
+                        values: array_field(item, "embedding", target)?
+                            .iter()
+                            .map(|value| {
+                                value.as_f64().map(|value| value as f32).ok_or_else(|| {
+                                    invalid_payload(target, "embedding value must be numeric")
+                                })
+                            })
+                            .collect::<Result<_, _>>()?,
+                    })
                 })
-                .collect(),
-            usage: Some(decode_usage(value.get("usage"))),
+                .collect::<Result<_, CoreError>>()?,
+            usage: value.get("usage").map(decode_usage),
         }),
-        OperationRequest::Images(_) => OperationResponse::Images(decode_images(&value)?),
-        OperationRequest::Audio(AudioRequest::Transcribe(_)) => {
-            OperationResponse::Audio(AudioResponse::Transcription(decode_transcription(&value)))
-        }
+        OperationRequest::Images(_) => OperationResponse::Images(decode_images(&value, target)?),
+        OperationRequest::Audio(AudioRequest::Transcribe(_)) => OperationResponse::Audio(
+            AudioResponse::Transcription(decode_transcription(&value, target)?),
+        ),
         OperationRequest::Audio(AudioRequest::Translate(_)) => {
             OperationResponse::Audio(AudioResponse::Translation(Translation {
-                text: value
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
+                text: required_str(&value, "text", target)?.into(),
                 source_language: value
                     .get("language")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
                 duration_seconds: value.get("duration").and_then(Value::as_f64),
-                segments: decode_segments(&value),
+                segments: decode_segments(&value, target)?,
             }))
         }
         OperationRequest::Search(SearchRequest::Rerank(_)) => {
             OperationResponse::Search(SearchResponse::Rerank(RerankResponse {
-                results: value
-                    .get("results")
-                    .and_then(Value::as_array)
-                    .unwrap_or(&vec![])
+                results: array_field(&value, "results", target)?
                     .iter()
-                    .map(|r| RerankResult {
-                        index: u32v(r, "index"),
-                        relevance_score: r
-                            .get("relevance_score")
-                            .and_then(Value::as_f64)
-                            .unwrap_or(0.0) as f32,
-                        document: r.get("document").map(|d| RerankDocument {
-                            id: None,
-                            text: d
-                                .get("text")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .into(),
-                            title: d.get("title").and_then(Value::as_str).map(str::to_owned),
-                        }),
+                    .map(|result| {
+                        Ok(RerankResult {
+                            index: required_u32(result, "index", target)?,
+                            relevance_score: required_f64(result, "relevance_score", target)?
+                                as f32,
+                            document: result
+                                .get("document")
+                                .map(|document| {
+                                    Ok::<_, CoreError>(RerankDocument {
+                                        id: document
+                                            .get("id")
+                                            .and_then(Value::as_str)
+                                            .map(str::to_owned),
+                                        text: required_str(document, "text", target)?.into(),
+                                        title: document
+                                            .get("title")
+                                            .and_then(Value::as_str)
+                                            .map(str::to_owned),
+                                    })
+                                })
+                                .transpose()?,
+                        })
                     })
-                    .collect(),
-                usage: Some(decode_usage(value.get("usage"))),
+                    .collect::<Result<_, CoreError>>()?,
+                usage: value.get("usage").map(decode_usage),
             }))
         }
         OperationRequest::Search(SearchRequest::Web(_)) => {
+            let results = value
+                .get("data")
+                .or_else(|| value.get("results"))
+                .and_then(Value::as_array)
+                .ok_or_else(|| invalid_payload(target, "missing data/results array"))?;
             OperationResponse::Search(SearchResponse::Web(WebSearchResponse {
-                results: value
-                    .get("data")
-                    .or_else(|| value.get("results"))
-                    .and_then(Value::as_array)
-                    .unwrap_or(&vec![])
+                results: results
                     .iter()
-                    .map(|r| WebSearchResult {
-                        url: r
-                            .get("url")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .into(),
-                        title: r
-                            .get("title")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .into(),
-                        snippet: r.get("snippet").and_then(Value::as_str).map(str::to_owned),
-                        published_at: r
-                            .get("published_at")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
-                        score: r.get("score").and_then(Value::as_f64).map(|v| v as f32),
+                    .map(|result| {
+                        Ok(WebSearchResult {
+                            url: required_str(result, "url", target)?.into(),
+                            title: required_str(result, "title", target)?.into(),
+                            snippet: result
+                                .get("snippet")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            published_at: result
+                                .get("published_at")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            score: result
+                                .get("score")
+                                .and_then(Value::as_f64)
+                                .map(|value| value as f32),
+                        })
                     })
-                    .collect(),
-                usage: Some(decode_usage(value.get("usage"))),
+                    .collect::<Result<_, CoreError>>()?,
+                usage: value.get("usage").map(decode_usage),
             }))
         }
         OperationRequest::Platform(PlatformRequest::Compact(_)) => {
-            OperationResponse::Platform(PlatformResponse::Compact(CompactResponse {
-                output: Vec::new(),
-                encrypted_content: value
-                    .get("encrypted_content")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                usage: Some(decode_usage(value.get("usage"))),
-            }))
+            OperationResponse::Platform(PlatformResponse::Compact(decode_compact(&value, target)?))
         }
         OperationRequest::Platform(PlatformRequest::CreateConversation(_)) => {
             OperationResponse::Platform(PlatformResponse::Conversation(Conversation {
-                id: value
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
-                items: Vec::new(),
-                metadata: Default::default(),
-            }))
-        }
-        OperationRequest::Platform(PlatformRequest::CreateRealtimeCall(_)) => {
-            OperationResponse::Platform(PlatformResponse::RealtimeCall(RealtimeCall {
-                id: value
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
-                answer_sdp: value
-                    .get("sdp")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
+                id: required_str(&value, "id", target)?.into(),
+                metadata: decode_string_map(value.get("metadata"), target)?,
             }))
         }
         _ => return Err(mode_error()),
     })
 }
 
-fn decode_model(v: &Value) -> Model {
-    Model {
-        id: ModelId(
-            v.get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .into(),
-        ),
-        display_name: v
+fn decode_model(value: &Value, target: OperationKey) -> Result<Model, CoreError> {
+    Ok(Model {
+        id: ModelId(required_str(value, "id", target)?.into()),
+        display_name: value
             .get("display_name")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        description: v
+        description: value
             .get("description")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        created_at: v.get("created").and_then(Value::as_i64),
-        capabilities: Vec::new(),
-        context_limit: v.get("context_window").and_then(Value::as_u64),
-        output_limit: v.get("max_output_tokens").and_then(Value::as_u64),
-    }
+        created_at: value.get("created").and_then(Value::as_i64),
+        capabilities: None,
+        context_limit: value.get("context_window").and_then(Value::as_u64),
+        output_limit: value.get("max_output_tokens").and_then(Value::as_u64),
+    })
 }
-fn decode_images(v: &Value) -> Result<ImageResponse, CoreError> {
+fn decode_images(value: &Value, target: OperationKey) -> Result<ImageResponse, CoreError> {
     Ok(ImageResponse {
-        images: v
-            .get("data")
-            .and_then(Value::as_array)
-            .unwrap_or(&vec![])
+        images: array_field(value, "data", target)?
             .iter()
             .enumerate()
-            .map(|(i, x)| {
+            .map(|(index, item)| {
                 Ok(ImageArtifact {
-                    id: crate::llm::ir::OutputId(i.to_string()),
-                    source: if let Some(url) = x.get("url").and_then(Value::as_str) {
+                    id: crate::llm::ir::OutputId(index.to_string()),
+                    source: if let Some(url) = item.get("url").and_then(Value::as_str) {
                         MediaSource::Url { url: url.into() }
                     } else {
+                        let encoded = required_str(item, "b64_json", target)?;
                         MediaSource::Data {
                             media_type: crate::llm::ir::MediaType(format!(
                                 "image/{}",
-                                v.get("output_format")
+                                value
+                                    .get("output_format")
                                     .and_then(Value::as_str)
                                     .unwrap_or("png")
                             )),
                             bytes: Bytes::from(
                                 base64::engine::general_purpose::STANDARD
-                                    .decode(
-                                        x.get("b64_json")
-                                            .and_then(Value::as_str)
-                                            .unwrap_or_default(),
-                                    )
-                                    .map_err(|e| CoreError::Endpoint(e.to_string()))?,
+                                    .decode(encoded)
+                                    .map_err(|error| {
+                                        invalid_payload(
+                                            target,
+                                            &format!("invalid base64 image: {error}"),
+                                        )
+                                    })?,
                             ),
                         }
                     },
-                    revised_prompt: x
+                    revised_prompt: item
                         .get("revised_prompt")
                         .and_then(Value::as_str)
                         .map(str::to_owned),
                 })
             })
             .collect::<Result<_, CoreError>>()?,
-        usage: Some(decode_usage(v.get("usage"))),
+        usage: value.get("usage").map(decode_usage),
     })
 }
-fn decode_transcription(v: &Value) -> Transcription {
-    Transcription {
-        text: v
-            .get("text")
+fn decode_transcription(value: &Value, target: OperationKey) -> Result<Transcription, CoreError> {
+    Ok(Transcription {
+        text: required_str(value, "text", target)?.into(),
+        language: value
+            .get("language")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .into(),
-        language: v.get("language").and_then(Value::as_str).map(str::to_owned),
-        duration_seconds: v.get("duration").and_then(Value::as_f64),
-        words: v
+            .map(str::to_owned),
+        duration_seconds: value.get("duration").and_then(Value::as_f64),
+        words: value
             .get("words")
             .and_then(Value::as_array)
-            .unwrap_or(&vec![])
-            .iter()
-            .map(|w| TranscriptWord {
-                text: w
-                    .get("word")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
-                start_seconds: w.get("start").and_then(Value::as_f64).unwrap_or(0.0),
-                end_seconds: w.get("end").and_then(Value::as_f64).unwrap_or(0.0),
-                speaker: w.get("speaker").and_then(Value::as_str).map(str::to_owned),
+            .into_iter()
+            .flatten()
+            .map(|word| {
+                Ok(TranscriptWord {
+                    text: required_str(word, "word", target)?.into(),
+                    start_seconds: required_f64(word, "start", target)?,
+                    end_seconds: required_f64(word, "end", target)?,
+                    speaker: word
+                        .get("speaker")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                })
             })
-            .collect(),
-        segments: decode_segments(v),
+            .collect::<Result<_, CoreError>>()?,
+        segments: decode_segments(value, target)?,
         usage: None,
-    }
+    })
 }
-fn decode_segments(v: &Value) -> Vec<TranscriptSegment> {
-    v.get("segments")
+fn decode_segments(
+    value: &Value,
+    target: OperationKey,
+) -> Result<Vec<TranscriptSegment>, CoreError> {
+    value
+        .get("segments")
         .and_then(Value::as_array)
-        .unwrap_or(&vec![])
+        .into_iter()
+        .flatten()
+        .map(|segment| decode_segment(segment, target))
+        .collect()
+}
+
+fn decode_compact(value: &Value, target: OperationKey) -> Result<CompactResponse, CoreError> {
+    let output = array_field(value, "output", target)?;
+    let mut content = None;
+    let mut encrypted_content = None;
+    let mut decoded = Vec::with_capacity(output.len());
+    for item in output {
+        if item.get("type").and_then(Value::as_str) == Some("message") {
+            let parts = array_field(item, "content", target)?;
+            for part in parts {
+                if part.get("type").and_then(Value::as_str) == Some("summary_text") {
+                    content = Some(required_str(part, "text", target)?.to_owned());
+                }
+            }
+        }
+        let item = super::generation::decode_output_item(item)?;
+        if let crate::llm::ir::generation::OutputItem::Compaction(compaction) = &item {
+            encrypted_content = Some(compaction.encrypted_content.clone());
+        }
+        decoded.push(item);
+    }
+    if let Some(content) = content {
+        if let Some(crate::llm::ir::generation::OutputItem::Compaction(compaction)) = decoded
+            .iter_mut()
+            .find(|item| matches!(item, crate::llm::ir::generation::OutputItem::Compaction(_)))
+        {
+            compaction.content = Some(content);
+        }
+    }
+    Ok(CompactResponse {
+        output: decoded,
+        encrypted_content,
+        usage: value.get("usage").map(decode_usage),
+    })
+}
+
+fn decode_string_map(
+    value: Option<&Value>,
+    target: OperationKey,
+) -> Result<std::collections::BTreeMap<String, String>, CoreError> {
+    let Some(value) = value else {
+        return Ok(Default::default());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid_payload(target, "metadata must be an object"))?;
+    object
         .iter()
-        .map(|s| TranscriptSegment {
-            id: s
-                .get("id")
-                .map(Value::to_string)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .into(),
-            text: s
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .into(),
-            start_seconds: s.get("start").and_then(Value::as_f64).unwrap_or(0.0),
-            end_seconds: s.get("end").and_then(Value::as_f64).unwrap_or(0.0),
-            speaker: s.get("speaker").and_then(Value::as_str).map(str::to_owned),
+        .map(|(key, value)| {
+            value
+                .as_str()
+                .map(|value| (key.clone(), value.to_owned()))
+                .ok_or_else(|| invalid_payload(target, "metadata values must be strings"))
         })
         .collect()
 }
@@ -680,13 +734,12 @@ fn decode_image_stream(
                 .unwrap_or_default();
             let event = if kind == format!("{expected}.partial_image") {
                 let encoded = value_field(&value, "b64_json")?;
+                let sequence = required_u32(&value, "partial_image_index", target)?;
                 crate::llm::ir::images::ImageEvent::Preview(ImagePreview {
                     index: 0,
-                    sequence: u32v(&value, "partial_image_index"),
+                    sequence,
                     image: ImageArtifact {
-                        id: crate::llm::ir::OutputId(
-                            u32v(&value, "partial_image_index").to_string(),
-                        ),
+                        id: crate::llm::ir::OutputId(sequence.to_string()),
                         source: MediaSource::Data {
                             media_type: crate::llm::ir::MediaType("image/png".into()),
                             bytes: Bytes::from(
@@ -699,7 +752,7 @@ fn decode_image_stream(
                     },
                 })
             } else if kind == format!("{expected}.completed") {
-                crate::llm::ir::images::ImageEvent::Finished(decode_images(&value)?)
+                crate::llm::ir::images::ImageEvent::Finished(decode_images(&value, target)?)
             } else {
                 return Err(CoreError::UnmodeledProviderEvent {
                     target,
@@ -708,6 +761,35 @@ fn decode_image_stream(
             };
             Ok(vec![OperationEvent::Image(event)])
         },
+    )))
+}
+
+fn decode_speech_stream(
+    request: &SpeechRequest,
+    response: crate::llm::wire::BinaryStreamResponse,
+) -> Result<DecodedResponse, CoreError> {
+    use futures_util::StreamExt;
+
+    let media_type = response
+        .content_type
+        .unwrap_or_else(|| request.format.media_type().to_owned());
+    let started = futures_util::stream::once(async move {
+        Ok(crate::llm::codec::OperationEvent::Speech(
+            SpeechEvent::Started { media_type },
+        ))
+    });
+    let deltas = response.stream.map(|chunk| {
+        chunk.map(|bytes| {
+            crate::llm::codec::OperationEvent::Speech(SpeechEvent::AudioDelta { bytes })
+        })
+    });
+    let finished = futures_util::stream::once(async {
+        Ok(crate::llm::codec::OperationEvent::Speech(
+            SpeechEvent::Finished,
+        ))
+    });
+    Ok(DecodedResponse::Stream(Box::pin(
+        started.chain(deltas).chain(finished),
     )))
 }
 fn decode_transcription_stream(
@@ -731,9 +813,11 @@ fn decode_transcription_stream(
                 "transcript.text.delta" => TranscriptionEvent::TextDelta {
                     text: value_field(&value, "delta")?.into(),
                 },
-                "transcript.text.segment" => TranscriptionEvent::Segment(decode_segment(&value)),
+                "transcript.text.segment" => {
+                    TranscriptionEvent::Segment(decode_segment(&value, target)?)
+                }
                 "transcript.text.done" => {
-                    TranscriptionEvent::Finished(decode_transcription(&value))
+                    TranscriptionEvent::Finished(decode_transcription(&value, target)?)
                 }
                 other => {
                     return Err(CoreError::UnmodeledProviderEvent {
@@ -769,33 +853,81 @@ fn model_query(request: &ListModelsRequest, provider: Provider) -> Vec<QueryPara
     .collect()
 }
 
-fn decode_segment(value: &Value) -> TranscriptSegment {
-    TranscriptSegment {
-        id: value
-            .get("id")
-            .map(Value::to_string)
-            .unwrap_or_default()
-            .trim_matches('"')
-            .into(),
-        text: value
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .into(),
-        start_seconds: value.get("start").and_then(Value::as_f64).unwrap_or(0.0),
-        end_seconds: value.get("end").and_then(Value::as_f64).unwrap_or(0.0),
+fn decode_segment(value: &Value, target: OperationKey) -> Result<TranscriptSegment, CoreError> {
+    let id = value
+        .get("id")
+        .and_then(|id| match id {
+            Value::String(value) => Some(value.clone()),
+            Value::Number(value) => Some(value.to_string()),
+            _ => None,
+        })
+        .ok_or_else(|| invalid_payload(target, "missing or invalid id"))?;
+    Ok(TranscriptSegment {
+        id,
+        text: required_str(value, "text", target)?.into(),
+        start_seconds: required_f64(value, "start", target)?,
+        end_seconds: required_f64(value, "end", target)?,
         speaker: value
             .get("speaker")
             .and_then(Value::as_str)
             .map(str::to_owned),
-    }
+    })
 }
 
 fn value_field<'a>(value: &'a Value, field: &str) -> Result<&'a str, CoreError> {
+    value.get(field).and_then(Value::as_str).ok_or_else(|| {
+        CoreError::Endpoint(format!(
+            "provider stream event is missing string field {field}"
+        ))
+    })
+}
+
+fn array_field<'a>(
+    value: &'a Value,
+    field: &str,
+    target: OperationKey,
+) -> Result<&'a Vec<Value>, CoreError> {
+    value
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_payload(target, &format!("missing or invalid {field} array")))
+}
+
+fn required_str<'a>(
+    value: &'a Value,
+    field: &str,
+    target: OperationKey,
+) -> Result<&'a str, CoreError> {
     value
         .get(field)
         .and_then(Value::as_str)
-        .ok_or_else(|| CoreError::Endpoint(format!("missing {field}")))
+        .ok_or_else(|| invalid_payload(target, &format!("missing or invalid string {field}")))
+}
+
+fn required_u64(value: &Value, field: &str, target: OperationKey) -> Result<u64, CoreError> {
+    value
+        .get(field)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_payload(target, &format!("missing or invalid integer {field}")))
+}
+
+fn required_u32(value: &Value, field: &str, target: OperationKey) -> Result<u32, CoreError> {
+    u32::try_from(required_u64(value, field, target)?)
+        .map_err(|_| invalid_payload(target, &format!("{field} exceeds u32")))
+}
+
+fn required_f64(value: &Value, field: &str, target: OperationKey) -> Result<f64, CoreError> {
+    value
+        .get(field)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| invalid_payload(target, &format!("missing or invalid number {field}")))
+}
+
+fn invalid_payload(target: OperationKey, reason: &str) -> CoreError {
+    CoreError::InvalidProviderPayload {
+        target,
+        reason: reason.to_owned(),
+    }
 }
 
 fn media_json(source: &MediaSource) -> Result<String, CoreError> {
@@ -851,8 +983,7 @@ fn enum_string<T: serde::Serialize>(v: Option<T>) -> Option<String> {
     v.and_then(|v| serde_json::to_value(v).ok())
         .and_then(|v| v.as_str().map(str::to_owned))
 }
-fn decode_usage(v: Option<&Value>) -> crate::llm::ir::Usage {
-    let v = v.unwrap_or(&Value::Null);
+fn decode_usage(v: &Value) -> crate::llm::ir::Usage {
     crate::llm::ir::Usage {
         input_tokens: v
             .get("prompt_tokens")
@@ -864,12 +995,6 @@ fn decode_usage(v: Option<&Value>) -> crate::llm::ir::Usage {
         reasoning_tokens: 0,
         total_tokens: v.get("total_tokens").and_then(Value::as_u64).unwrap_or(0),
     }
-}
-fn u32v(v: &Value, k: &str) -> u32 {
-    v.get(k)
-        .and_then(Value::as_u64)
-        .and_then(|v| u32::try_from(v).ok())
-        .unwrap_or(0)
 }
 fn is_stream(r: &OperationRequest) -> bool {
     matches!(
@@ -884,6 +1009,9 @@ fn is_stream(r: &OperationRequest) -> bool {
             })
         ) | OperationRequest::Audio(AudioRequest::Transcribe(TranscriptionRequest {
             mode: TranscriptionMode::Stream,
+            ..
+        })) | OperationRequest::Audio(AudioRequest::Speech(SpeechRequest {
+            mode: SpeechMode::Stream,
             ..
         }))
     )
@@ -903,14 +1031,30 @@ fn parse_query(q: &str) -> Result<Vec<QueryParam>, CoreError> {
 fn strict(
     d: Vec<gproxy_transform::TransformDiagnostic>,
     target: OperationKey,
+    capability: Capability,
 ) -> Result<(), CoreError> {
     if d.is_empty() {
         Ok(())
     } else {
-        Err(CoreError::UnsupportedCapability {
-            capability: Capability::TextGeneration,
-            target,
-        })
+        Err(CoreError::UnsupportedCapability { capability, target })
+    }
+}
+fn request_capability(operation: Operation) -> Capability {
+    match operation {
+        Operation::ListModels | Operation::GetModel => Capability::ModelCatalog,
+        Operation::CountTokens => Capability::TokenCounting,
+        Operation::CreateEmbedding => Capability::Embeddings,
+        Operation::CreateImage => Capability::ImageGeneration,
+        Operation::EditImage => Capability::ImageEditing,
+        Operation::CreateSpeech => Capability::Speech,
+        Operation::CreateTranscription => Capability::Transcription,
+        Operation::CreateTranslation => Capability::Translation,
+        Operation::WebSearch => Capability::WebSearch,
+        Operation::Rerank => Capability::Rerank,
+        Operation::CompactContent => Capability::Compaction,
+        Operation::CreateConversation => Capability::Conversation,
+        Operation::CreateRealtimeCall | Operation::ConnectRealtime => Capability::Realtime,
+        _ => Capability::TextGeneration,
     }
 }
 fn transform_error(e: gproxy_transform::TransformError) -> CoreError {

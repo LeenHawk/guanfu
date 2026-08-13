@@ -441,7 +441,7 @@ fn decode_complete(body: &JsonBody) -> Result<GenerateResponse, CoreError> {
     })
 }
 
-fn decode_output_item(value: &Value) -> Result<OutputItem, CoreError> {
+pub(super) fn decode_output_item(value: &Value) -> Result<OutputItem, CoreError> {
     let kind = value
         .get("type")
         .and_then(Value::as_str)
@@ -476,6 +476,9 @@ fn decode_output_item(value: &Value) -> Result<OutputItem, CoreError> {
                             .unwrap_or_default()
                             .into(),
                     }),
+                    Some("summary_text") => Ok(OutputContent::SummaryText {
+                        text: required_str(part, "text")?.into(),
+                    }),
                     other => Err(unmodeled(kind_key(other), Operation::GenerateContent)),
                 })
                 .collect::<Result<_, _>>()?,
@@ -494,6 +497,14 @@ fn decode_output_item(value: &Value) -> Result<OutputItem, CoreError> {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             signature: None,
+        }),
+        "compaction" => OutputItem::Compaction(CompactionOutput {
+            id: output_id,
+            content: value
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            encrypted_content: required_str(value, "encrypted_content")?.into(),
         }),
         "function_call" => OutputItem::ToolCall(ToolCall::Function(FunctionCall {
             id: output_id,

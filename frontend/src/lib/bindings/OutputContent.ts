@@ -3,4 +3,5 @@ import type { Citation } from "./Citation";
 
 export type OutputContent =
   | { type: "text"; text: string; citations: Array<Citation> }
-  | { type: "refusal"; text: string };
+  | { type: "refusal"; text: string }
+  | { type: "summary_text"; text: string };

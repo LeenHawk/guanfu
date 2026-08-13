@@ -47,6 +47,12 @@ pub enum CoreError {
         event: String,
     },
 
+    #[error("invalid provider payload for {target:?}: {reason}")]
+    InvalidProviderPayload {
+        target: gproxy_protocol::OperationKey,
+        reason: String,
+    },
+
     #[error("upstream returned status {status}")]
     Upstream { status: u16, body: String },
 }
@@ -100,7 +106,9 @@ impl CoreError {
                 ErrorCode::UnsupportedCapability,
                 Some(json!({ "capability": capability })),
             ),
-            Self::UnmodeledProviderEvent { .. } => (ErrorCode::InvalidData, None),
+            Self::UnmodeledProviderEvent { .. } | Self::InvalidProviderPayload { .. } => {
+                (ErrorCode::InvalidData, None)
+            }
             Self::Upstream { status, .. } => (
                 ErrorCode::UpstreamRejected,
                 Some(json!({ "status": status })),

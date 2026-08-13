@@ -97,7 +97,6 @@ pub struct CompactResponse {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Conversation {
     pub id: String,
-    pub items: Vec<OutputItem>,
     pub metadata: std::collections::BTreeMap<String, String>,
 }
 

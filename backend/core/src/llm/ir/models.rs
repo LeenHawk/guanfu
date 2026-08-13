@@ -39,7 +39,7 @@ pub struct Model {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub created_at: Option<i64>,
-    pub capabilities: Vec<ModelCapability>,
+    pub capabilities: Option<Vec<ModelCapability>>,
     pub context_limit: Option<u64>,
     pub output_limit: Option<u64>,
 }

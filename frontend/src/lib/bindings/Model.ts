@@ -7,7 +7,7 @@ export type Model = {
   display_name: string | null;
   description: string | null;
   created_at: number | null;
-  capabilities: Array<ModelCapability>;
+  capabilities: Array<ModelCapability> | null;
   context_limit: number | null;
   output_limit: number | null;
 };

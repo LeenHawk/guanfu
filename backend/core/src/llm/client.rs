@@ -5,9 +5,9 @@ use futures_util::StreamExt;
 use gproxy_protocol::Provider;
 
 use crate::llm::wire::{
-    parse_json_sse, BinaryResponse, JsonResponse, JsonSseResponse, MultipartBody, MultipartValue,
-    RequestBody, ResponseMetadata, ResponseMode, UpstreamErrorResponse, WireRequest, WireResponse,
-    WireResult,
+    parse_json_sse, BinaryResponse, BinaryStreamResponse, JsonResponse, JsonSseResponse,
+    MultipartBody, MultipartValue, RequestBody, ResponseMetadata, ResponseMode,
+    UpstreamErrorResponse, WireRequest, WireResponse, WireResult,
 };
 use crate::CoreError;
 
@@ -60,9 +60,7 @@ impl LlmClient {
     ) -> Result<WireResult, CoreError> {
         let url = format!("{}{}", target.base_url.trim_end_matches('/'), request.path);
         let mut builder = self.http.request(request.method, url);
-        if request.response_mode != ResponseMode::JsonSse {
-            builder = builder.timeout(self.request_timeout);
-        }
+        builder = builder.timeout(self.request_timeout);
         if !request.query.is_empty() {
             let query = request
                 .query
@@ -107,6 +105,21 @@ impl LlmClient {
                     metadata,
                     content_type,
                     body: response.bytes().await?,
+                })
+            }
+            ResponseMode::BinaryStream => {
+                let content_type = metadata
+                    .headers
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned);
+                let stream = response
+                    .bytes_stream()
+                    .map(|item| item.map_err(CoreError::from));
+                WireResponse::BinaryStream(BinaryStreamResponse {
+                    metadata,
+                    content_type,
+                    stream: Box::pin(stream),
                 })
             }
             ResponseMode::JsonSse => {

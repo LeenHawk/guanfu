@@ -16,6 +16,7 @@ pub struct GenerateResponse {
 pub enum OutputItem {
     Message(OutputMessage),
     Reasoning(ReasoningOutput),
+    Compaction(CompactionOutput),
     ToolCall(ToolCall),
     ToolExecution(ToolExecution),
     Image(ImageArtifact),
@@ -27,12 +28,20 @@ impl OutputItem {
         match self {
             Self::Message(value) => &value.id,
             Self::Reasoning(value) => &value.id,
+            Self::Compaction(value) => &value.id,
             Self::ToolCall(value) => value.output_id(),
             Self::ToolExecution(value) => &value.id,
             Self::Image(value) => &value.id,
             Self::Audio(value) => &value.id,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+pub struct CompactionOutput {
+    pub id: OutputId,
+    pub content: Option<String>,
+    pub encrypted_content: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -49,6 +58,9 @@ pub enum OutputContent {
         citations: Vec<Citation>,
     },
     Refusal {
+        text: String,
+    },
+    SummaryText {
         text: String,
     },
 }
