@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDF9F0"/>
+      <stop offset="1" stop-color="#F3E5C8"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFDF6"/>
+      <stop offset="1" stop-color="#FBEDD0"/>
+    </linearGradient>
+    <clipPath id="win">
+      <circle cx="512" cy="452" r="276"/>
+    </clipPath>
+  </defs>
+
+  <!-- 底：暖米色渐变圆角方 + 鎏金内框 -->
+  <rect x="0" y="0" width="1024" height="1024" rx="212" fill="url(#bg)"/>
+  <rect x="46" y="46" width="932" height="932" rx="178" fill="none"
+        stroke="#C9962E" stroke-width="7" opacity="0.55"/>
+
+  <!-- 月洞窗环：外鎏金 → 朱砂 → 内鎏金 -->
+  <circle cx="512" cy="452" r="330" fill="#C9962E"/>
+  <circle cx="512" cy="452" r="320" fill="#F8F0DC"/>
+  <circle cx="512" cy="452" r="314" fill="#C4402F"/>
+  <circle cx="512" cy="452" r="284" fill="#C9962E"/>
+  <circle cx="512" cy="452" r="276" fill="url(#sky)"/>
+
+  <!-- 窗内景 -->
+  <g clip-path="url(#win)">
+    <!-- 旭日与光晕 -->
+    <circle cx="622" cy="342" r="118" fill="#E9B44C" opacity="0.30"/>
+    <circle cx="622" cy="342" r="80" fill="#E9B44C"/>
+    <!-- 远山三叠 -->
+    <path d="M 206 566 Q 376 392 566 560 L 566 760 L 206 760 Z" fill="#AECFC2"/>
+    <path d="M 430 592 Q 612 412 828 600 L 828 760 L 430 760 Z" fill="#7FB0A2"/>
+    <path d="M 140 648 Q 322 500 540 656 Q 664 718 898 646 L 898 770 L 140 770 Z" fill="#4E8E8B"/>
+    <!-- 回纹水波 -->
+    <g fill="none" stroke-linecap="round">
+      <path d="M 280 690 q 38 -24 76 0 q 38 24 76 0 q 38 -24 76 0 q 38 24 76 0"
+            stroke="#2F6664" stroke-width="13"/>
+      <path d="M 318 728 q 38 -24 76 0 q 38 24 76 0 q 38 -24 76 0"
+            stroke="#6FA39B" stroke-width="13"/>
+    </g>
+    <!-- 飞鸟两只 -->
+    <g fill="none" stroke="#6A6156" stroke-linecap="round">
+      <path d="M 384 300 Q 398 284 412 300 M 412 300 Q 426 284 440 300" stroke-width="9"/>
+      <path d="M 448 252 Q 458 240 468 252 M 468 252 Q 478 240 488 252" stroke-width="7"/>
+    </g>
+  </g>
+
+  <!-- 印章：回字纹（回 = 复） -->
+  <rect x="466" y="826" width="92" height="92" rx="14" fill="#C4402F"/>
+  <rect x="482" y="842" width="60" height="60" fill="#F8F0DC"/>
+  <rect x="491" y="851" width="42" height="42" fill="#C4402F"/>
+  <rect x="502" y="862" width="20" height="20" fill="#F8F0DC"/>
+</svg>
