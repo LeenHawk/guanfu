@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use super::audio::{AudioRequest, AudioResponse};
 use super::embeddings::{EmbeddingRequest, EmbeddingResponse};
 use super::generation::{GenerateRequest, GenerateResponse};
+use super::images::{ImageRequest, ImageResponse};
 use super::models::{ModelRequest, ModelResponse};
 use super::tokens::{CountTokensRequest, CountTokensResponse};
 
@@ -12,6 +14,8 @@ pub enum OperationRequest {
     CountTokens(CountTokensRequest),
     Generate(GenerateRequest),
     Embeddings(EmbeddingRequest),
+    Images(ImageRequest),
+    Audio(AudioRequest),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -21,4 +25,6 @@ pub enum OperationResponse {
     CountTokens(CountTokensResponse),
     Generate(GenerateResponse),
     Embeddings(EmbeddingResponse),
+    Images(ImageResponse),
+    Audio(AudioResponse),
 }
