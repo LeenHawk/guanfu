@@ -5,7 +5,8 @@ use chrono::Utc;
 use futures_util::StreamExt;
 use gproxy_protocol::Provider;
 use gproxy_transform::stream_adapter::SseTransformer;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::sea_query::{Expr, ExprTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 
 use crate::entities::{channel, credential};
 use crate::llm::capability::{self, Capability};
@@ -45,7 +46,7 @@ impl LlmService {
 
     pub async fn execute(
         &self,
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         req: LlmRequest,
     ) -> Result<LlmReply, CoreError> {
         let ch = channel::Entity::find_by_id(req.channel_id)
@@ -186,7 +187,10 @@ fn upstream_error(reply: LlmReply) -> CoreError {
     }
 }
 
-async fn mark_success(db: &DatabaseConnection, cred: &credential::Model) -> Result<(), CoreError> {
+async fn mark_success(
+    db: &impl ConnectionTrait,
+    cred: &credential::Model,
+) -> Result<(), CoreError> {
     let mut am: credential::ActiveModel = cred.clone().into();
     am.failure_count = Set(0);
     am.cooldown_until = Set(None);
@@ -196,16 +200,24 @@ async fn mark_success(db: &DatabaseConnection, cred: &credential::Model) -> Resu
 }
 
 async fn mark_failure(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     cred: &credential::Model,
     kind: FailureKind,
 ) -> Result<(), CoreError> {
-    let failures = cred.failure_count + 1;
-    let mut am: credential::ActiveModel = cred.clone().into();
-    am.failure_count = Set(failures);
-    if let Some(d) = pool::cooldown_after(kind, failures) {
-        am.cooldown_until = Set(Some(Utc::now() + d));
+    // 多实例：计数用 SQL 原子自增，避免 read-modify-write 竞态；
+    // 退避时长按本地估算的次数计算，竞态下略有偏差可接受（best-effort）。
+    let mut update = credential::Entity::update_many()
+        .col_expr(
+            credential::Column::FailureCount,
+            Expr::col(credential::Column::FailureCount).add(1),
+        )
+        .filter(credential::Column::Id.eq(cred.id));
+    if let Some(d) = pool::cooldown_after(kind, cred.failure_count + 1) {
+        update = update.col_expr(
+            credential::Column::CooldownUntil,
+            Expr::value(Some(Utc::now() + d)),
+        );
     }
-    am.update(db).await?;
+    update.exec(db).await?;
     Ok(())
 }

@@ -47,10 +47,19 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
 
 ## 前端约束
 
-- i18n：所有用户可见文案走 i18n 词条，不硬编码（i18n 方案在首次涉及文案时选型引入，并更新本文件）
-- 亮暗模式：全站支持亮/暗主题（默认跟随系统，可手动切换），用 Tailwind 的 dark variant 实现；新 UI 两种模式都要可用
-- 响应式：桌面 / 平板 / 手机三档都要可用，优先用 Tailwind 断点实现
-- 无障碍：优先语义化 HTML；交互元素可键盘操作，图片有 alt，表单控件有 label；不要压制 Svelte 编译器的 a11y 警告
+- 组件化：页面组件只做组合与数据编排，可复用 UI 拆成独立组件（行数上限见「代码约定」）
+- 设计 token：颜色 / 间距 / 圆角 / 阴影 / 字级用 Tailwind theme token，组件里不散落裸色值和 magic number
+- 状态完整性：异步页面覆盖 loading / empty / error / success；提交中按钮 disabled 防重复；错误要展示给用户，不许只 console
+- 表单：统一验证方式；客户端验证只为体验、不可信任；错误提示挂在对应字段且可被辅助技术识别
+- 交互一致性：Modal / Toast / Confirm / Dropdown / 分页 / 搜索等同类交互用统一组件，不各页各写一套
+- i18n：文案全走词条不硬编码、不拼接句子；日期 / 数字 / 货币按 locale 格式化；定义默认语言与 fallback（方案首次涉及文案时选型引入并更新本文件）
+- 亮暗模式：跟随系统 + 可手动切换；主题差异只走 CSS / Tailwind `dark:`，禁止 JS 维护两套颜色；首屏不闪主题
+- 响应式：桌面 / 平板 / 手机三档可用（Tailwind 断点）；表格、弹窗、导航要有明确移动端策略，触控目标 ≥ 44px；考虑超长文本 / URL / i18n 文案扩张的溢出，不依赖固定文案长度撑布局
+- 无障碍：语义化 HTML、键盘可操作、alt / label 齐全，不压制 Svelte 的 a11y 警告；关键控件保持稳定语义（同时服务测试）；动画只为反馈服务并支持 prefers-reduced-motion
+- 数据层：API 调用集中管理，组件不散落 fetch；类型来自 bindings、避免 any，外部数据在边界处校验；可分享 / 刷新的状态（筛选、分页、tab）放 URL 而不是组件 state
+- SSR 安全：不在模块顶层无条件访问 window / document / localStorage
+- 安全：避免 `{@html}`，确需使用时内容必须经可信 sanitize；token 等敏感信息不进前端日志与持久化存储
+- 性能：重组件按需加载，长列表分页或虚拟化，图片标明尺寸防 CLS；优先标准 Web API，不为小功能引入大依赖或 polyfill
 
 ## 后端约束
 
@@ -61,6 +70,9 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
   - 需要裸 SQL 时用 `raw_sql!` 宏（参数插值防注入），不手拼 SQL 字符串
   - 批量插入用 2.0 重做的 `insert_many` API
 - schema 演进：entity-first——写 Model → sync 生成 schema，不手写 migration 文件
+- 多实例：从一开始按「多个观复实例共享同一数据库」设计——跨请求 / 跨实例的状态存库不存进程内存；并发写用原子更新、唯一约束、乐观锁，避免 read-modify-write 竞态；不假设单写者
+- 事务：一个业务操作的多次相关写入放同一事务；数据层函数接收 `&impl ConnectionTrait`，同一份代码兼容普通连接与事务；事务内不等待 LLM / 文件等长外部 IO，跨外部调用的流程状态显式建模（pending / running / failed）
+- 错误处理：core 用结构化错误（thiserror），业务代码不返回 Axum / Tauri 错误类型；对前端只暴露稳定 error code（+ 可选 details），DbErr / reqwest / anyhow 的原始字符串只进日志；用户可见文案由前端按 code 走 i18n；anyhow 仅限应用入口与启动流程
 - LLM 协议层用 gproxy-protocol / gproxy-transform / gproxy-tokenize（本项目用户是其作者），出站 HTTP 用 reqwest
 - 遇到疑似 gproxy 协议层 bug：不要在本仓库悄悄绕过，向用户提出，并到 https://github.com/LeenHawk/gproxy 提 issue
 

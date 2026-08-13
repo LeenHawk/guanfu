@@ -1,5 +1,8 @@
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set,
+    TransactionSession, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::entities::{channel, credential};
@@ -72,7 +75,7 @@ pub struct ChannelService;
 
 impl ChannelService {
     pub async fn create_channel(
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         input: NewChannel,
     ) -> Result<ChannelDto, CoreError> {
         parse_provider(&input.provider)
@@ -90,7 +93,7 @@ impl ChannelService {
         Ok(m.into())
     }
 
-    pub async fn list_channels(db: &DatabaseConnection) -> Result<Vec<ChannelDto>, CoreError> {
+    pub async fn list_channels(db: &impl ConnectionTrait) -> Result<Vec<ChannelDto>, CoreError> {
         Ok(channel::Entity::find()
             .all(db)
             .await?
@@ -100,7 +103,7 @@ impl ChannelService {
     }
 
     pub async fn set_channel_enabled(
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         id: i32,
         enabled: bool,
     ) -> Result<(), CoreError> {
@@ -114,18 +117,23 @@ impl ChannelService {
         Ok(())
     }
 
-    /// 删除渠道及其全部凭证。
-    pub async fn delete_channel(db: &DatabaseConnection, id: i32) -> Result<(), CoreError> {
+    /// 删除渠道及其全部凭证（同一事务）。
+    pub async fn delete_channel(
+        db: &(impl ConnectionTrait + TransactionTrait),
+        id: i32,
+    ) -> Result<(), CoreError> {
+        let txn = db.begin().await?;
         credential::Entity::delete_many()
             .filter(credential::Column::ChannelId.eq(id))
-            .exec(db)
+            .exec(&txn)
             .await?;
-        channel::Entity::delete_by_id(id).exec(db).await?;
+        channel::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
         Ok(())
     }
 
     pub async fn add_credential(
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         input: NewCredential,
     ) -> Result<CredentialDto, CoreError> {
         channel::Entity::find_by_id(input.channel_id)
@@ -147,7 +155,7 @@ impl ChannelService {
     }
 
     pub async fn list_credentials(
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         channel_id: i32,
     ) -> Result<Vec<CredentialDto>, CoreError> {
         Ok(credential::Entity::find()
@@ -159,7 +167,7 @@ impl ChannelService {
             .collect())
     }
 
-    pub async fn remove_credential(db: &DatabaseConnection, id: i32) -> Result<(), CoreError> {
+    pub async fn remove_credential(db: &impl ConnectionTrait, id: i32) -> Result<(), CoreError> {
         credential::Entity::delete_by_id(id).exec(db).await?;
         Ok(())
     }
