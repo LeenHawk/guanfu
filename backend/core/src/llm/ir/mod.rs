@@ -10,6 +10,8 @@ pub mod generation;
 pub mod images;
 pub mod models;
 mod operation;
+pub mod platform;
+pub mod search;
 pub mod tokens;
 
 pub use common::*;
