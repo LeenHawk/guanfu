@@ -69,12 +69,19 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
   - 唯一键自动生成的类型安全捷径 `find_by_xxx()` / `filter_by_xxx()`，少手写 filter 链
   - 需要裸 SQL 时用 `raw_sql!` 宏（参数插值防注入），不手拼 SQL 字符串
   - 批量插入用 2.0 重做的 `insert_many` API
-- schema 演进：entity-first——写 Model → sync 生成 schema，不手写 migration 文件
+- schema 演进：entity-first，Model 是 schema 的事实来源；开发期新增表 / 字段 / 索引走 schema sync（只增不删）；数据搬迁或 sync 无法安全表达的破坏性变更允许显式 migration，禁止在运行时业务代码里偷偷修数据库；sync 的调用位置统一管理，业务模块不得自行执行
 - 多实例：从一开始按「多个观复实例共享同一数据库」设计——跨请求 / 跨实例的状态存库不存进程内存；并发写用原子更新、唯一约束、乐观锁，避免 read-modify-write 竞态；不假设单写者
 - 事务：一个业务操作的多次相关写入放同一事务；数据层函数接收 `&impl ConnectionTrait`，同一份代码兼容普通连接与事务；事务内不等待 LLM / 文件等长外部 IO，跨外部调用的流程状态显式建模（pending / running / failed）
 - 错误处理：core 用结构化错误（thiserror），业务代码不返回 Axum / Tauri 错误类型；对前端只暴露稳定 error code（+ 可选 details），DbErr / reqwest / anyhow 的原始字符串只进日志；用户可见文案由前端按 code 走 i18n；anyhow 仅限应用入口与启动流程
 - LLM 协议层用 gproxy-protocol / gproxy-transform / gproxy-tokenize（本项目用户是其作者），出站 HTTP 用 reqwest
 - 遇到疑似 gproxy 协议层 bug：不要在本仓库悄悄绕过，向用户提出，并到 https://github.com/LeenHawk/gproxy 提 issue
+- LLM 流式：生成、流式解析、工具调用编排只在 core 实现；core 对外暴露传输无关的流式事件 enum（如 ChatEvent），Tauri 壳映射为 Channel、Axum 壳映射为 SSE——不许两个壳各写一套生成逻辑，层间不传未定义的 JSON Value / 字符串协议
+- 取消与超时：客户端断开 / 取消要向下传播，不让上游模型调用继续空跑；所有外部网络请求必须有明确 timeout，禁止无限等待
+- 共享资源：DatabaseConnection、reqwest::Client、注册表等长生命周期资源在启动时创建，经 AppState 显式注入（Tauri State 与 Axum State 共用同一结构）；不在每次调用重建 reqwest::Client，core 不通过全局变量取资源
+- 并发：async 代码不直接做明显阻塞的 CPU / 同步 IO（确需则 spawn_blocking）；锁 guard 不跨 `.await` 长持；锁落在最小共享对象上，不把整个 AppState 包进大 Mutex
+- DTO 与实体：SeaORM Model 是持久化模型，不直接当 API DTO；ts-rs 只生成跨前后端边界的 DTO，不把数据库内部类型全暴露给前端；简单 CRUD 直接转换即可，不为形式建 repository / domain 层
+- 配置：启动阶段集中读取并以结构化 Config 注入，core 不自行读环境变量；两个壳可有不同配置来源，进入 core 后统一类型
+- 日志：统一 tracing（正式日志不用 println!/eprintln!）；请求、LLM 生成、tool call 等关键流程建 span 并携带 request_id / conversation_id 等关联字段；不记录 API key 等凭证，不默认记录完整 prompt / response（调试内容走显式开关）
 
 ## 提交前检查
 
