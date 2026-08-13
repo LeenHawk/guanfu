@@ -11,19 +11,28 @@ pub enum RouteDecision {
     Unsupported,
 }
 
-/// 在一个渠道的持久化路由矩阵中查找源协议单元格。缺行即 unsupported。
-pub fn decide(
+/// Compile the enabled routes for a semantic operation in channel priority order.
+/// A passthrough cell targets its own wire kind because semantic callers have no
+/// source wire format.
+pub fn targets_for_operation(
     rules: &[routing_rule::Model],
-    source: OperationKey,
-) -> Result<RouteDecision, CoreError> {
-    for rule in rules.iter().filter(|rule| rule.enabled) {
-        let (rule_source, decision) = compile_rule(rule)?;
-        if rule_source != source {
-            continue;
-        }
-        return Ok(decision);
-    }
-    Ok(RouteDecision::Unsupported)
+    operation: Operation,
+) -> Result<Vec<RouteDecision>, CoreError> {
+    let mut matching = rules
+        .iter()
+        .filter(|rule| rule.enabled && Operation::from(rule.operation) == operation)
+        .collect::<Vec<_>>();
+    matching.sort_by_key(|rule| rule.sort_order);
+    matching
+        .into_iter()
+        .map(|rule| {
+            let (source, decision) = compile_rule(rule)?;
+            Ok(match decision {
+                RouteDecision::Passthrough => RouteDecision::TransformTo(source),
+                other => other,
+            })
+        })
+        .collect()
 }
 
 pub fn compile_rule(
@@ -84,13 +93,6 @@ mod tests {
 
     use super::*;
 
-    fn source() -> OperationKey {
-        OperationKey::content_generation(
-            Operation::GenerateContent,
-            ContentGenerationKind::OpenAiResponses,
-        )
-    }
-
     fn rule(
         implementation: RouteImplementation,
         dest_kind: Option<RoutingKind>,
@@ -111,26 +113,30 @@ mod tests {
     }
 
     #[test]
-    fn missing_rule_is_unsupported() {
-        assert_eq!(decide(&[], source()).unwrap(), RouteDecision::Unsupported);
+    fn missing_operation_has_no_targets() {
+        assert!(targets_for_operation(&[], Operation::GenerateContent)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
     fn transform_resolves_destination_key() {
-        let decision = decide(
+        let decisions = targets_for_operation(
             &[rule(
                 RouteImplementation::TransformTo,
                 Some(RoutingKind::ClaudeMessages),
             )],
-            source(),
+            Operation::GenerateContent,
         )
         .unwrap();
         assert_eq!(
-            decision,
-            RouteDecision::TransformTo(OperationKey::content_generation(
-                Operation::GenerateContent,
-                ContentGenerationKind::ClaudeMessages,
-            ))
+            decisions,
+            vec![RouteDecision::TransformTo(
+                OperationKey::content_generation(
+                    Operation::GenerateContent,
+                    ContentGenerationKind::ClaudeMessages,
+                )
+            )]
         );
     }
 }

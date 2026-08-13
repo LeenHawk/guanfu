@@ -1,8 +1,9 @@
 use guanfu_core::error::ApiError;
+use guanfu_core::llm::ir::OperationResponse;
 use guanfu_core::services::channels::{
     ChannelDto, ChannelService, CredentialDto, NewChannel, NewCredential,
 };
-use guanfu_core::services::llm::{ChatEvent, CompleteReply, LlmOutput, LlmRequestDto};
+use guanfu_core::services::llm::{SemanticLlmOutput, SemanticLlmRequest, SemanticStreamMessage};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingRuleDto, RoutingService};
 use guanfu_core::{AppState, CoreError};
 use tauri::{ipc::Channel, State};
@@ -20,9 +21,9 @@ pub async fn execute_llm(
     state: State<'_, AppState>,
     active: State<'_, ActiveLlmRequests>,
     request_id: String,
-    input: LlmRequestDto,
-    on_event: Channel<ChatEvent>,
-) -> Result<Option<CompleteReply>, ApiError> {
+    input: SemanticLlmRequest,
+    on_event: Channel<SemanticStreamMessage>,
+) -> Result<Option<OperationResponse>, ApiError> {
     use futures_util::StreamExt;
 
     let cancellation = CancellationToken::new();
@@ -33,7 +34,7 @@ pub async fn execute_llm(
         .insert(request_id.clone(), cancellation.clone());
     let execute = state
         .llm
-        .execute(&state.db, input.try_into().map_err(api_error)?);
+        .execute(&state.db, input.channel_id, input.request);
     let output = tokio::select! {
         result = execute => result.map_err(api_error)?,
         () = cancellation.cancelled() => {
@@ -42,21 +43,21 @@ pub async fn execute_llm(
         }
     };
     let result = match output {
-        LlmOutput::Complete(reply) => Ok(Some(reply)),
-        LlmOutput::Stream(mut stream) => {
+        SemanticLlmOutput::Complete(response) => Ok(Some(response)),
+        SemanticLlmOutput::Stream(mut stream) => {
             loop {
                 let item = tokio::select! {
                     item = stream.next() => item,
                     () = cancellation.cancelled() => break,
                 };
                 let Some(item) = item else { break };
-                let event = match item {
-                    Ok(event) => event,
-                    Err(error) => ChatEvent::Error {
+                let message = match item {
+                    Ok(event) => SemanticStreamMessage::Event { event },
+                    Err(error) => SemanticStreamMessage::Error {
                         error: error.api_error(),
                     },
                 };
-                if on_event.send(event).is_err() {
+                if on_event.send(message).is_err() {
                     break;
                 }
             }

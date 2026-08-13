@@ -1,11 +1,8 @@
-use std::pin::Pin;
 use std::sync::Once;
 use std::time::Duration;
 
-use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
-use gproxy_protocol::endpoint::request_target;
-use gproxy_protocol::{OperationKey, Provider};
+use futures_util::StreamExt;
+use gproxy_protocol::Provider;
 
 use crate::llm::wire::{
     parse_json_sse, BinaryResponse, JsonResponse, JsonSseResponse, MultipartBody, MultipartValue,
@@ -18,31 +15,6 @@ use crate::CoreError;
 pub struct CallTarget<'a> {
     pub base_url: &'a str,
     pub secret: &'a str,
-}
-
-pub struct LlmResponse {
-    pub status: u16,
-    pub body: Bytes,
-}
-
-pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, CoreError>> + Send>>;
-
-pub enum LlmReply {
-    Complete(LlmResponse),
-    /// 流式（SSE）响应，body 为原始字节流。
-    Stream {
-        status: u16,
-        stream: ByteStream,
-    },
-}
-
-impl LlmReply {
-    pub fn status(&self) -> u16 {
-        match self {
-            LlmReply::Complete(r) => r.status,
-            LlmReply::Stream { status, .. } => *status,
-        }
-    }
 }
 
 pub struct LlmClient {
@@ -75,49 +47,6 @@ impl LlmClient {
         Self {
             http,
             request_timeout,
-        }
-    }
-
-    /// 发起一次上游请求。`body` 为目标协议的 JSON 字节。
-    ///
-    /// 非流式或非 2xx 时聚合完整响应体；流式成功时返回原始字节流。
-    pub async fn execute(
-        &self,
-        target: &CallTarget<'_>,
-        key: OperationKey,
-        model: &str,
-        stream: bool,
-        body: Option<Vec<u8>>,
-    ) -> Result<LlmReply, CoreError> {
-        let rt = request_target(key, model, stream)
-            .map_err(|e| CoreError::Endpoint(format!("{e:?}")))?;
-        let mut url = format!("{}{}", target.base_url.trim_end_matches('/'), rt.path);
-        if let Some(q) = &rt.query {
-            url.push('?');
-            url.push_str(q);
-        }
-        let method: reqwest::Method = rt.method.into();
-        let mut req = self.http.request(method, url);
-        if !stream {
-            req = req.timeout(self.request_timeout);
-        }
-        req = apply_auth(req, key.provider_family(), target.secret);
-        if let Some(body) = body {
-            req = req
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(body);
-        }
-        let resp = req.send().await?;
-        let status = resp.status().as_u16();
-        if stream && resp.status().is_success() {
-            let s = resp.bytes_stream().map(|r| r.map_err(CoreError::from));
-            Ok(LlmReply::Stream {
-                status,
-                stream: Box::pin(s),
-            })
-        } else {
-            let body = resp.bytes().await?;
-            Ok(LlmReply::Complete(LlmResponse { status, body }))
         }
     }
 

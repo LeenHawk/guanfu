@@ -1,19 +1,14 @@
 //! LLM 接入层。
 //!
-//! 数据流（内容生成）：
-//! 适配层传入带明确 [`gproxy_protocol::OperationKey`] 的 wire JSON
-//! → 渠道路由表决定直通、转换、本地处理或不支持
-//! → [`transform::TransformPlan`] 按需转换协议（gproxy-transform）
-//! → [`client::LlmClient`] 经 reqwest 调用上游（gproxy-protocol 合成端点）
-//! → 响应/SSE 反向转换回调用方的源 wire 格式。
-//! 凭证排序与失败分类见 [`pool`]，failover 执行在 `services::llm`。
+//! 调用方只传入 provider-neutral semantic IR。渠道路由表选择目标 wire
+//! 格式，codec 使用 gproxy 协议组件完成双向转换；provider 原生载荷不会
+//! 越过 codec 边界。凭证排序与 failover 执行位于 `services::llm`。
 
 pub mod client;
 pub mod codec;
 pub mod ir;
 pub mod pool;
 pub mod routing;
-pub mod transform;
 pub mod wire;
 
 /// 本地估算 token 数（tiktoken → 字符估算的降级阶梯，见 gproxy-tokenize）。

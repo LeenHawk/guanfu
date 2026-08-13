@@ -1,7 +1,6 @@
 use guanfu_core::entities::routing_rule::{RoutingKind, RoutingOperation};
 use guanfu_core::error::{ApiError, ErrorCode};
 use guanfu_core::services::channels::{ChannelDto, CredentialDto, NewChannel, NewCredential};
-use guanfu_core::services::llm::{ChatEvent, CompleteReply, LlmRequestDto};
 use guanfu_core::services::routing::{
     OperationKeyDto, PutRoutingRule, RoutingImplementation, RoutingRuleDto,
 };
@@ -21,8 +20,5 @@ fn main() -> Result<(), ts_rs::ExportError> {
     RoutingImplementation::export_all(&config)?;
     RoutingRuleDto::export_all(&config)?;
     PutRoutingRule::export_all(&config)?;
-    LlmRequestDto::export_all(&config)?;
-    CompleteReply::export_all(&config)?;
-    ChatEvent::export_all(&config)?;
     Ok(())
 }

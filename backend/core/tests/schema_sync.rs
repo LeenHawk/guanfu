@@ -1,8 +1,10 @@
 //! entity-first 全链路冒烟：sync 建表 → service 层 CRUD。
 
 use gproxy_protocol::{ContentGenerationKind, Operation, OperationKey};
+use guanfu_core::llm::ir::tokens::{CountTokensRequest, TokenCountInput};
+use guanfu_core::llm::ir::{ModelId, OperationRequest, OperationResponse};
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
-use guanfu_core::services::llm::{LlmOutput, LlmRequest};
+use guanfu_core::services::llm::SemanticLlmOutput;
 use guanfu_core::services::routing::{
     OperationKeyDto, PutRoutingRule, RoutingImplementation, RoutingService,
 };
@@ -93,20 +95,20 @@ async fn entity_first_sync_and_crud() {
         .llm
         .execute(
             &db,
-            LlmRequest {
-                channel_id: ch.id,
-                operation: count_source,
-                model: "gpt-4.1-mini".into(),
-                stream: false,
-                body: Some(br#"{"input":"hello world"}"#.to_vec()),
-            },
+            ch.id,
+            OperationRequest::CountTokens(CountTokensRequest {
+                model: ModelId("gpt-4.1-mini".into()),
+                input: TokenCountInput::Text {
+                    values: vec!["hello world".into()],
+                },
+            }),
         )
         .await
         .unwrap();
-    let LlmOutput::Complete(output) = output else {
+    let SemanticLlmOutput::Complete(OperationResponse::CountTokens(output)) = output else {
         panic!("local token counting must be complete");
     };
-    assert!(output.body["input_tokens"].as_u64().unwrap() > 0);
+    assert!(output.input_tokens > 0);
 
     ChannelService::delete_channel(&db, ch.id).await.unwrap();
     assert!(ChannelService::list_channels(&db).await.unwrap().is_empty());

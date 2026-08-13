@@ -5,8 +5,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use guanfu_core::error::ApiError;
+use guanfu_core::llm::codec::OperationEvent;
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
-use guanfu_core::services::llm::{ChatEvent, LlmOutput, LlmRequestDto};
+use guanfu_core::services::llm::{SemanticLlmOutput, SemanticLlmRequest, SemanticStreamMessage};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingService};
 use guanfu_core::{AppState, CoreError};
 
@@ -31,23 +32,28 @@ pub fn router(state: AppState) -> Router {
 
 async fn execute_llm(
     State(state): State<AppState>,
-    Json(input): Json<LlmRequestDto>,
+    Json(input): Json<SemanticLlmRequest>,
 ) -> Result<Response, HttpError> {
-    match state.llm.execute(&state.db, input.try_into()?).await? {
-        LlmOutput::Complete(reply) => Ok(Json(reply).into_response()),
-        LlmOutput::Stream(stream) => {
+    match state
+        .llm
+        .execute(&state.db, input.channel_id, input.request)
+        .await?
+    {
+        SemanticLlmOutput::Complete(response) => Ok(Json(response).into_response()),
+        SemanticLlmOutput::Stream(stream) => {
             use futures_util::StreamExt;
             let stream = stream.map(|item| {
-                let event = match item {
-                    Ok(event) => event,
-                    Err(error) => ChatEvent::Error {
+                let message = match item {
+                    Ok(event) => SemanticStreamMessage::Event { event },
+                    Err(error) => SemanticStreamMessage::Error {
                         error: error.api_error(),
                     },
                 };
                 Ok::<_, std::convert::Infallible>(
                     Event::default()
-                        .event(event_name(&event))
-                        .data(serde_json::to_string(&event).expect("ChatEvent is serializable")),
+                        .event(event_name(&message))
+                        .json_data(message)
+                        .expect("semantic stream messages are serializable"),
                 )
             });
             Ok(Sse::new(stream).into_response())
@@ -55,11 +61,21 @@ async fn execute_llm(
     }
 }
 
-fn event_name(event: &ChatEvent) -> &'static str {
-    match event {
-        ChatEvent::Frame { .. } => "frame",
-        ChatEvent::Done => "done",
-        ChatEvent::Error { .. } => "error",
+fn event_name(message: &SemanticStreamMessage) -> &'static str {
+    match message {
+        SemanticStreamMessage::Event {
+            event: OperationEvent::Generate(_),
+        } => "generate",
+        SemanticStreamMessage::Event {
+            event: OperationEvent::Image(_),
+        } => "image",
+        SemanticStreamMessage::Event {
+            event: OperationEvent::Speech(_),
+        } => "speech",
+        SemanticStreamMessage::Event {
+            event: OperationEvent::Transcription(_),
+        } => "transcription",
+        SemanticStreamMessage::Error { .. } => "error",
     }
 }
 
