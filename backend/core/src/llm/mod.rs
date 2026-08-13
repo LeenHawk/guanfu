@@ -13,6 +13,7 @@ pub mod ir;
 pub mod pool;
 pub mod routing;
 pub mod transform;
+pub mod wire;
 
 /// 本地估算 token 数（tiktoken → 字符估算的降级阶梯，见 gproxy-tokenize）。
 pub fn count_tokens_local(model: &str, body: &[u8]) -> u64 {

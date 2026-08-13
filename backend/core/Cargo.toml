@@ -17,6 +17,8 @@ gproxy-transform = "2"
 gproxy-tokenize = { version = "2", features = ["tiktoken"] }
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
+  "multipart",
+  "query",
   "stream",
   "rustls-no-provider",
 ] }
@@ -26,6 +28,7 @@ serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["serde"] }
 bytes = { version = "1", features = ["serde"] }
+http = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 eventsource-stream = "0.2"
 tracing = "0.1"
