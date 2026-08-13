@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -39,12 +40,17 @@ impl Default for LlmService {
 
 impl LlmService {
     pub fn new() -> Self {
+        Self::with_timeouts(Duration::from_secs(10), Duration::from_secs(120))
+    }
+
+    pub fn with_timeouts(connect_timeout: Duration, request_timeout: Duration) -> Self {
         Self {
-            client: LlmClient::new(),
+            client: LlmClient::with_timeouts(connect_timeout, request_timeout),
             rotation: AtomicUsize::new(0),
         }
     }
 
+    #[tracing::instrument(skip(self, db, req), fields(channel_id = req.channel_id))]
     pub async fn execute(
         &self,
         db: &impl ConnectionTrait,

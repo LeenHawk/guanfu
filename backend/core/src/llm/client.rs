@@ -42,6 +42,7 @@ impl LlmReply {
 
 pub struct LlmClient {
     http: reqwest::Client,
+    request_timeout: Duration,
 }
 
 impl Default for LlmClient {
@@ -52,6 +53,10 @@ impl Default for LlmClient {
 
 impl LlmClient {
     pub fn new() -> Self {
+        Self::with_timeouts(Duration::from_secs(10), Duration::from_secs(120))
+    }
+
+    pub fn with_timeouts(connect_timeout: Duration, request_timeout: Duration) -> Self {
         static INSTALL_RUSTLS_PROVIDER: Once = Once::new();
         INSTALL_RUSTLS_PROVIDER.call_once(|| {
             // reqwest 0.13 的 `rustls-no-provider` 允许选择 ring，避免默认
@@ -59,10 +64,13 @@ impl LlmClient {
             let _ = rustls::crypto::ring::default_provider().install_default();
         });
         let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
+            .connect_timeout(connect_timeout)
             .build()
             .expect("reqwest client construction is infallible with these options");
-        Self { http }
+        Self {
+            http,
+            request_timeout,
+        }
     }
 
     /// 发起一次上游请求。`body` 为目标协议的 JSON 字节。
@@ -85,6 +93,9 @@ impl LlmClient {
         }
         let method: reqwest::Method = rt.method.into();
         let mut req = self.http.request(method, url);
+        if !stream {
+            req = req.timeout(self.request_timeout);
+        }
         req = apply_auth(req, key.provider_family(), target.secret);
         if let Some(body) = body {
             req = req

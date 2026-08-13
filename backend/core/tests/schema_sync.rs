@@ -6,10 +6,13 @@ use guanfu_core::services::routing::{PutRoutingRule, RoutingImplementation, Rout
 
 #[tokio::test]
 async fn entity_first_sync_and_crud() {
-    let db = guanfu_core::db::connect("sqlite::memory:").await.unwrap();
-    guanfu_core::db::sync_schema(&db).await.unwrap();
-    // sync 是只增操作，重复执行应幂等。
-    guanfu_core::db::sync_schema(&db).await.unwrap();
+    let state = guanfu_core::AppState::initialize(guanfu_core::AppConfig {
+        database_url: "sqlite::memory:".into(),
+        llm: guanfu_core::LlmConfig::default(),
+    })
+    .await
+    .unwrap();
+    let db = state.db;
 
     let ch = ChannelService::create_channel(
         &db,

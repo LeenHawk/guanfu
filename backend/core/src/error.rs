@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error("database error: {0}")]
@@ -35,4 +37,57 @@ pub enum CoreError {
 
     #[error("upstream returned status {status}")]
     Upstream { status: u16, body: String },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    Database,
+    UpstreamUnavailable,
+    InvalidData,
+    InvalidRoute,
+    ChannelNotFound,
+    NoUsableCredential,
+    UnsupportedRoute,
+    UpstreamRejected,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ApiError {
+    pub code: ErrorCode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+impl CoreError {
+    pub fn api_error(&self) -> ApiError {
+        use serde_json::json;
+
+        let (code, details) = match self {
+            Self::Db(_) => (ErrorCode::Database, None),
+            Self::Http(_) => (ErrorCode::UpstreamUnavailable, None),
+            Self::Json(_) => (ErrorCode::InvalidData, None),
+            Self::Endpoint(_) | Self::Transform(_) | Self::InvalidRoutingRule { .. } => {
+                (ErrorCode::InvalidRoute, None)
+            }
+            Self::ChannelNotFound(id) => (ErrorCode::ChannelNotFound, Some(json!({ "id": id }))),
+            Self::NoUsableCredential(channel_id) => (
+                ErrorCode::NoUsableCredential,
+                Some(json!({ "channel_id": channel_id })),
+            ),
+            Self::UnsupportedRoute {
+                channel_id,
+                operation,
+            } => (
+                ErrorCode::UnsupportedRoute,
+                Some(json!({ "channel_id": channel_id, "operation": operation })),
+            ),
+            Self::UnsupportedRouteImplementation { .. } => (ErrorCode::UnsupportedRoute, None),
+            Self::Upstream { status, .. } => (
+                ErrorCode::UpstreamRejected,
+                Some(json!({ "status": status })),
+            ),
+        };
+        ApiError { code, details }
+    }
 }

@@ -1,0 +1,48 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use sea_orm::DatabaseConnection;
+
+use crate::services::llm::LlmService;
+use crate::{db, CoreError};
+
+#[derive(Clone, Debug)]
+pub struct LlmConfig {
+    pub connect_timeout: Duration,
+    pub request_timeout: Duration,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(120),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AppConfig {
+    pub database_url: String,
+    pub llm: LlmConfig,
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DatabaseConnection,
+    pub llm: Arc<LlmService>,
+    pub config: AppConfig,
+}
+
+impl AppState {
+    /// 应用的唯一数据库启动入口：连接后立即同步 entity-first schema。
+    pub async fn initialize(config: AppConfig) -> Result<Self, CoreError> {
+        let db = db::connect(&config.database_url).await?;
+        db::sync_schema(&db).await?;
+        let llm = Arc::new(LlmService::with_timeouts(
+            config.llm.connect_timeout,
+            config.llm.request_timeout,
+        ));
+        Ok(Self { db, llm, config })
+    }
+}

@@ -6,10 +6,12 @@
 //! - [`services`]：面向适配层（tauri / axum）的服务接口，与传输层无关
 //! - [`db`]：数据库连接与 schema 同步
 
-pub mod db;
+mod app;
+mod db;
 pub mod entities;
 pub mod error;
 pub mod llm;
 pub mod services;
 
+pub use app::{AppConfig, AppState, LlmConfig};
 pub use error::CoreError;
