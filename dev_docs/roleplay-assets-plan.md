@@ -1,0 +1,412 @@
+# Roleplay Assets 与 Pipeline 实施计划
+
+本文是阶段 5 的当前实施依据。角色卡、persona、世界书、预设、正则和 pipeline
+统一建模为带 kind 的版本化 JSON Asset；数据库保存领域文档和关系数据，File/S3
+只保存图片、音频等二进制内容。
+
+## 1. 当前基础
+
+阶段 1—4 的通用 LLM IR、codec、operation 路由和双端流式适配主体已经落地，真实
+渠道冒烟仍待验收。阶段 5 已经完成以下 IR 前置补丁：
+
+- sampling 支持 frequency/presence penalty，并按目标协议编码
+- reasoning 请求参数已经建模
+- 历史消息允许 system role
+- 协议专用参数使用按目标 kind 匹配的 JSON merge patch
+- 未命中的协议参数和目标不支持的 best-effort sampling 默认丢弃
+- 请求 transform incompatibility 可以触发 route fallback
+- reasoning continuation、finish/failure 和协议核心字段保护已经收口
+
+协议层仍有一组“IR 已声明但 codec 没有完整兑现”的缺口，详见
+[`protocol-gap-audit.md`](protocol-gap-audit.md)。剩余缺口按对应能力启用时间处理；
+message definition 和聊天 runner 已不再被 generation P0 语义阻塞。
+
+## 2. 存储边界
+
+### 2.1 数据库保存领域状态
+
+以下内容以数据库为事实来源：
+
+- Asset 的 kind、名称和版本化 definition
+- Asset 之间由 typed ID 表达的引用
+- conversation 和 message 等运行数据
+- channel、credential 和 routing rule 等连接配置
+
+数据库提供查询、事务、并发控制和多实例一致性。JSON 只用于保存总是整体加载、
+编辑和交换的领域文档，不用它代替消息列表等关系数据。
+
+### 2.2 AssetStore 保存二进制
+
+图片、音频和导入时选择保留的原始文件不进入数据库。数据库中的 Media Asset
+只保存：
+
+- sha256
+- MIME type
+- byte size
+- storage key
+
+实际字节通过注入 AppState 的 `AssetStore` 读取和写入：Tauri 与单实例 Axum
+可以使用本地目录，多实例 Axum 使用 S3 或兼容对象存储。外部存储写入不能放在
+数据库事务中；先写对象、再提交元数据，失败产生的孤儿对象由后续显式维护操作
+清理。
+
+## 3. 统一 Asset 实体
+
+第一版只建一张 Asset 实例表，不为角色卡、persona、世界书、预设、正则或
+pipeline 分表：
+
+```text
+asset
+- id
+- kind
+- name
+- definition JSON
+- revision
+- created_at
+- updated_at
+```
+
+- `kind` 使用 SeaORM `ActiveEnum`，用于过滤和选择对应的 typed definition。
+- `definition` 使用 SeaORM JSON 列，但不能以任意 `serde_json::Value` 穿过 core
+  服务边界。
+- `revision` 用于多实例下的乐观更新；更新条件是 `id + revision`，成功后原子递增。
+- definition 的 schema version 由各 typed serde enum 自己携带，不与数据库
+  schema 版本混淆。
+
+第一版 Asset kind：
+
+```rust
+pub enum AssetKind {
+    Character,
+    Persona,
+    WorldBook,
+    OpenAiChatPreset,
+    RegexScript,
+    Pipeline,
+    Media,
+}
+```
+
+数据库 Model 不直接作为 API DTO。core 根据 kind 将 JSON 解码为对应类型：
+
+```rust
+CharacterDefinition::V1(...)
+PersonaDefinition::V1(...)
+WorldBookDefinition::V1(...)
+OpenAiChatPresetDefinition::V1(...)
+RegexScriptDefinition::V1(...)
+PipelineDefinition::V1(...)
+MediaDefinition::V1(...)
+```
+
+kind 与 definition 类型不一致时返回稳定的结构化错误。未知交换字段保存在对应
+definition 的 `extra`，不自动进入模型请求。
+
+### 3.1 引用策略
+
+第一版不增加通用 `asset_reference` 表。资源引用作为 typed Asset ID 保存在
+definition 中，并由服务在保存和加载时检查目标是否存在、kind 是否匹配：
+
+- Character 可以引用 WorldBook、RegexScript 和 Media
+- Persona 可以引用 Media 和 WorldBook
+- OpenAiChatPreset 可以引用 RegexScript
+- Pipeline definition 可以引用其他 Asset，但默认 pipeline 不固定环境资源
+
+如果以后出现按反向引用查询、级联策略或大规模 Media GC 的实际需求，再把引用
+投影到关系表；当前不提前维护 JSON 与关系表两份事实来源。
+
+## 4. 各 Asset definition 的第一版范围
+
+### 4.1 Character
+
+Character definition 保存 CCv2 可移植内容：
+
+- name、description、personality、scenario
+- creator notes、system prompt、post-history instructions
+- 有序 greetings；第一项对应 `first_mes`，其余对应 `alternate_greetings`
+- 示例对话、tags、creator、character version
+- WorldBook/RegexScript/Media Asset 引用
+- CCv2 extensions 与未识别字段的保真数据
+
+SillyTavern 本地 chat、收藏、文件名和 proxy 状态不进入共享 Character definition。
+
+### 4.2 Persona
+
+Persona definition 保存名称、描述、position、头像 Media 引用和交换扩展。默认
+persona 或会话锁定属于运行选择，不写入可分享 Persona。
+
+### 4.3 WorldBook
+
+WorldBook definition 内保存有序 entries，不单独建立 entry 表。第一版表达：
+
+- primary/secondary keys 与 selective logic
+- content、enabled、constant、order
+- position、depth、role
+- probability 与大小写设置
+- 递归和预算所需的已调查字段
+- 未知交换字段
+
+角色内嵌世界书只是 CCv2 交换形态。导入时创建独立 WorldBook Asset，并在
+Character definition 中记录引用。
+
+### 4.4 OpenAI Chat Preset
+
+Preset definition 保存：
+
+- 有序 prompts
+- prompt-order profiles
+- sampling 与 reasoning
+- ST 上下文组装辅助字段
+- RegexScript Asset 引用
+- 导入导出保真使用的 extra
+
+channel、credential、base URL、proxy 和 model 选择不进入可分享 preset。
+
+### 4.5 RegexScript
+
+Regex definition 保存脚本、placement、顺序和 ST 交换字段。信任/启用授权是
+本地运行状态，导入脚本默认不受信任，不能仅凭 Asset 内容获得执行权限。
+
+### 4.6 Pipeline
+
+Pipeline definition 使用版本化 typed JSON。V1 只建模：
+
+```text
+ContextBuild -> Generate -> TextTransform
+```
+
+节点表示一次模型交互或一次完整纯变换，提示词片段不作为节点。默认 pipeline
+不固定 channel、model、preset 或 conversation，这些由 `PipelineRunInput` 提供。
+
+V1 runner 只支持线性链；DAG 泛化、AgentLoop 和编辑 UI 后置。
+
+### 4.7 Media
+
+Media definition 只描述存储在 AssetStore 中的对象，不包含二进制。Character、
+Persona 和 Message 通过 Asset ID 引用它。
+
+## 5. 会话运行数据
+
+conversation 和 message 仍使用独立关系表，因为消息需要频繁追加、按序分页和
+并发写入：
+
+```text
+conversation
+- id
+- title
+- character_asset_id
+- persona_asset_id optional
+- preset_asset_id
+- pipeline_asset_id optional
+- created_at
+- updated_at
+
+message
+- id
+- conversation_id
+- sequence
+- role
+- content JSON
+- created_at
+- updated_at
+```
+
+Asset ID 外键只能保证目标存在，具体 kind 由 core 服务校验。第一版为线性历史，
+不增加 parent message、分支树或 pipeline run 持久化。
+
+消息 content 使用 typed content enum，允许文本、reasoning、tool call/result 和
+Media 引用；不在层间传裸协议 JSON。
+
+### 5.1 Reasoning continuation
+
+assistant message 必须保存完整、有序的 reasoning 输出，而不是只保存 UI 可见文本。
+第一版使用 typed parts：
+
+```rust
+pub struct ReasoningOutput {
+    pub id: OutputId,
+    pub parts: Vec<ReasoningPart>,
+}
+
+pub enum ReasoningPart {
+    Summary { text: String },
+    Text {
+        text: String,
+        continuation: Option<ReasoningContinuation>,
+    },
+    Opaque { continuation: ReasoningContinuation },
+}
+
+pub enum ReasoningContinuation {
+    OpenAiEncrypted { content: String },
+    ClaudeSignature { signature: String },
+    ClaudeRedacted { data: String },
+    GeminiThoughtSignature { signature: String },
+}
+```
+
+这些 continuation 是 provider 生成、客户端不能解释的续接状态，不是原生协议
+事件透传：
+
+- 与 assistant message 在同一数据库提交中原样保存，不放 AssetStore。
+- 保持 reasoning、tool call 和普通文本的原始次序，不拼接或重新签名。
+- 不写日志、不默认发送给 UI、不进入角色卡或普通聊天导出。
+- UI 只展示 summary 或 provider 明确返回的可见 reasoning text。
+- 同协议、同模型的 continuation 原样回放；普通已提交历史切换协议时只使用可移植
+  文本和摘要。
+- 未完成的工具循环固定原 route/model。缺少必要 continuation 时返回 route incompatible，
+  不能静默丢弃后继续执行。
+
+gproxy 2.6.4 在协议边界把 Claude signature/redacted data 和 Gemini
+`thought_signature` 统一放入 Responses reasoning item 的 `encrypted_content`，并能
+在回放时按目标协议还原。观复的 decoder 根据实际 route 和 reasoning item 是否带
+可见 text，将这个 canonical opaque value 标注为对应的 `ReasoningContinuation`；不自行
+解析内容，也不增加 provider 原生 JSON 旁路。
+
+OpenAI `encrypted_content`、Claude redacted data 和各家 signature 本身按 opaque
+字符串保存，不需要只对这些字段再加一层应用加密。如果威胁模型要求防止数据库
+泄露，应加密整个 message payload 或数据库，因为用户消息、可见 reasoning 和
+summary 同样敏感。
+
+gproxy 2.6.4 已闭合 Claude/Gemini 的完整响应、流式响应与历史回放转换；观复 codec
+也已完成有序 parts 解码、流式最终项和同协议回放。消息持久化在本阶段的
+conversation/message 实体中实现。
+
+## 6. CCv2 导入导出
+
+第一版支持：
+
+- CCv2 JSON
+- PNG `chara` chunk
+- `data.*` 优先
+- greetings 顺序保持
+- embedded character book 转换为 WorldBook Asset 引用
+- 未知 extensions 保真
+
+第一版不支持 CCv3、CharX、BYAF、instruct preset 或 text completion preset。
+PNG 同时包含 `chara` 和 `ccv3` 时只读取 `chara`。
+
+导入分为两层：
+
+1. 纯 exchange codec 将外部格式转换为 typed definitions。
+2. service 在一个数据库事务中保存 Character、WorldBook 等 Asset。
+
+PNG 文件本身只有在用户选择保留原件时才作为 Media Asset 保存；解析后的
+Character definition 始终是数据库中的正式可编辑数据。
+
+## 7. ContextBuild 与执行边界
+
+5b 的数据流：
+
+```text
+runner 从数据库加载并解析 Asset + conversation history
+  -> ContextSnapshot
+  -> build_context(snapshot)
+  -> GenerationDraft
+  -> Generate
+  -> GenerationResult
+  -> TextTransform
+  -> committed output
+```
+
+`ContextBuild` 是纯函数，负责 prompt order、宏展开、世界书激活与预算、示例
+对话裁剪、深度注入和历史裁剪。数据库查询和 Asset JSON 解码在 snapshot loader
+完成；需要模型调用的 compact 不能藏进 ContextBuild。
+
+Generate 的 OperationEvent 作为临时进度流向 UI，runner 累积完整结果；下游
+TextTransform 完成后再发出最终 committed output。PipelineEvent 只携带已经建模
+的语义事件，不透传原生 SSE 或协议 JSON。
+
+## 8. 分步实施与提交
+
+### 5a：Asset、会话与交换格式
+
+1. `feat: add unified asset storage`
+   - Asset entity、AssetKind、revision
+   - 各 definition 的版本外壳和 typed Asset ID
+   - typed JSON 编解码边界
+
+2. `feat: model roleplay asset definitions`
+   - Character、Persona、WorldBook
+   - OpenAI Chat Preset、RegexScript、Pipeline、Media
+   - 重新生成 ts-rs bindings
+
+3. `fix: preserve reasoning continuation state`（已完成）
+   - 有序 ReasoningPart 与 typed ReasoningContinuation
+   - 完整响应和流式响应对称累积
+   - 消费 gproxy 2.6.4 的 canonical continuation 转换
+   - 结束原因与失败语义收口
+
+4. `feat: add conversation persistence`
+   - conversation/message entity
+   - typed message content
+   - 线性消息追加和分页所需的最小 service
+
+5. `feat: support ccv2 json assets`
+   - typed exchange DTO
+   - JSON 导入导出
+   - embedded world book 事务导入
+
+6. `feat: add media asset storage`
+   - `AssetStore` trait
+   - 本地目录实现
+   - Media Asset 元数据保存
+
+7. `feat: support ccv2 png assets`
+   - PNG `chara` 读取和写出
+   - 可选保留原始 PNG
+
+### 5b：最小聊天通路
+
+8. `feat: build roleplay context snapshots`
+   - snapshot loader
+   - 纯 ContextBuild
+   - ST 必要语义子集
+
+9. `feat: run linear generation pipelines`
+   - 线性 runner
+   - pipeline-level progress 与 committed output
+   - 内置默认 pipeline
+
+10. `feat: expose persistent roleplay chat`
+    - core 服务接口
+    - Tauri Channel 与 Axum SSE 薄适配
+    - 取消传播和消息提交
+
+11. `feat: add roleplay chat interface`
+    - 选择 Character、Persona、Preset、Channel 和 model
+    - 流式临时文本与最终 committed output
+    - 消息持久化、重试和基础 markdown
+
+### 5c：图泛化
+
+- typed ports 与 DAG 校验
+- 并行分支
+- 有界 AgentLoop
+- pipeline 编辑 UI
+- 条件节点、子图和结构化循环按实际需求继续评估
+
+## 9. 验证范围
+
+不做大而全的兼容测试。当前只保留：
+
+- schema sync 覆盖新增实体
+- Asset kind 与 definition 不匹配时的边界测试
+- 一个 CCv2 JSON fixture：标准字段、greetings 顺序、extensions 保真
+- 一个 embedded character book 导入测试
+- 一个 PNG `chara` round-trip
+- 一个 ContextBuild fixture
+- 一条线性 pipeline 的流式进度与最终提交测试
+
+每个 Rust 提交运行 `cargo fmt`、`cargo check` 和无警告的 `cargo clippy`；只有改变
+前端或 bindings 时运行对应 pnpm 检查。
+
+## 10. 明确后置
+
+- CCv3、CharX、BYAF
+- text completion/instruct preset
+- 群聊、消息分支和 pipeline run 持久化
+- 完整 SillyTavern 宏与世界书高级行为
+- 图内任意环、条件节点和可视化编辑器
+- 对象存储具体厂商实现
+- 自动 Media GC

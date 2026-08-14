@@ -3,8 +3,14 @@ use serde_json::Value;
 use super::*;
 use crate::llm::ir::generation::*;
 
-pub(super) fn decode_complete(body: &JsonBody) -> Result<GenerateResponse, CoreError> {
+pub(super) fn decode_complete(
+    body: &JsonBody,
+    source: OperationKey,
+) -> Result<GenerateResponse, CoreError> {
     let value: Value = body.decode()?;
+    if value.get("status").and_then(Value::as_str) == Some("failed") {
+        return Err(CoreError::OperationFailed(decode_failure(&value)));
+    }
     let id = required_str(&value, "id")?;
     let model = required_str(&value, "model")?;
     let output = value
@@ -12,9 +18,9 @@ pub(super) fn decode_complete(body: &JsonBody) -> Result<GenerateResponse, CoreE
         .and_then(Value::as_array)
         .ok_or_else(|| invalid_payload("Responses output is missing"))?
         .iter()
-        .map(decode_output_item)
+        .map(|item| decode_output_item(item, source))
         .collect::<Result<Vec<_>, _>>()?;
-    let finish = decode_finish(&value)?;
+    let finish = decode_finish(&value, None)?;
     let usage = value.get("usage").map(decode_usage).transpose()?;
     Ok(GenerateResponse {
         id: crate::llm::ir::GenerationId(id.into()),
@@ -25,7 +31,10 @@ pub(super) fn decode_complete(body: &JsonBody) -> Result<GenerateResponse, CoreE
     })
 }
 
-pub(in crate::llm::codec) fn decode_output_item(value: &Value) -> Result<OutputItem, CoreError> {
+pub(in crate::llm::codec) fn decode_output_item(
+    value: &Value,
+    source: OperationKey,
+) -> Result<OutputItem, CoreError> {
     let kind = required_str(value, "type")?;
     let id = required_str(value, "id")?.to_owned();
     let output_id = crate::llm::ir::OutputId(id.clone());
@@ -60,21 +69,7 @@ pub(in crate::llm::codec) fn decode_output_item(value: &Value) -> Result<OutputI
                 })
                 .collect::<Result<_, _>>()?,
         }),
-        "reasoning" => OutputItem::Reasoning(ReasoningOutput {
-            id: output_id,
-            summary: value
-                .get("summary")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|part| part.get("text").and_then(Value::as_str).map(str::to_owned))
-                .collect(),
-            encrypted_content: value
-                .get("encrypted_content")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            signature: None,
-        }),
+        "reasoning" => OutputItem::Reasoning(decode_reasoning(value, output_id, source)?),
         "compaction" => OutputItem::Compaction(CompactionOutput {
             id: output_id,
             content: value
@@ -174,15 +169,183 @@ pub(in crate::llm::codec) fn decode_output_item(value: &Value) -> Result<OutputI
     })
 }
 
-fn decode_finish(value: &Value) -> Result<FinishReason, CoreError> {
+fn decode_reasoning(
+    value: &Value,
+    id: crate::llm::ir::OutputId,
+    source: OperationKey,
+) -> Result<ReasoningOutput, CoreError> {
+    let mut parts = value
+        .get("summary")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|part| {
+            Ok(ReasoningPart::Summary {
+                text: required_str(part, "text")?.into(),
+            })
+        })
+        .collect::<Result<Vec<_>, CoreError>>()?;
+    let texts = value
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|part| Ok(required_str(part, "text")?.to_owned()))
+        .collect::<Result<Vec<_>, CoreError>>()?;
+    let mut continuation = value
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .map(|value| decode_continuation(source, value, !texts.is_empty()))
+        .transpose()?;
+    let final_text = texts.len().checked_sub(1);
+    parts.extend(texts.into_iter().enumerate().map(|(index, text)| {
+        ReasoningPart::Text {
+            text,
+            continuation: (Some(index) == final_text)
+                .then(|| continuation.take())
+                .flatten(),
+        }
+    }));
+    if let Some(continuation) = continuation {
+        parts.push(ReasoningPart::Opaque { continuation });
+    }
+    Ok(ReasoningOutput { id, parts })
+}
+
+fn decode_continuation(
+    source: OperationKey,
+    value: &str,
+    has_text: bool,
+) -> Result<ReasoningContinuation, CoreError> {
+    Ok(match source.kind() {
+        OperationKind::Provider(gproxy_protocol::Provider::Claude) if has_text => {
+            ReasoningContinuation::ClaudeSignature {
+                signature: value.into(),
+            }
+        }
+        OperationKind::Provider(gproxy_protocol::Provider::Claude) => {
+            ReasoningContinuation::ClaudeRedacted { data: value.into() }
+        }
+        OperationKind::Provider(gproxy_protocol::Provider::Gemini) => {
+            ReasoningContinuation::GeminiThoughtSignature {
+                signature: value.into(),
+            }
+        }
+        OperationKind::Provider(_) => ReasoningContinuation::OpenAiEncrypted {
+            content: value.into(),
+        },
+        OperationKind::ContentGeneration(ContentGenerationKind::ClaudeMessages) if has_text => {
+            ReasoningContinuation::ClaudeSignature {
+                signature: value.into(),
+            }
+        }
+        OperationKind::ContentGeneration(ContentGenerationKind::ClaudeMessages) => {
+            ReasoningContinuation::ClaudeRedacted { data: value.into() }
+        }
+        OperationKind::ContentGeneration(ContentGenerationKind::GeminiGenerateContent) => {
+            ReasoningContinuation::GeminiThoughtSignature {
+                signature: value.into(),
+            }
+        }
+        OperationKind::ContentGeneration(
+            ContentGenerationKind::OpenAiResponses
+            | ContentGenerationKind::OpenAiResponsesWebSocket
+            | ContentGenerationKind::OpenAiChatCompletions,
+        ) => ReasoningContinuation::OpenAiEncrypted {
+            content: value.into(),
+        },
+        _ => {
+            return Err(CoreError::InvalidProviderPayload {
+                target: source,
+                reason: "reasoning continuation came from an unsupported generation protocol"
+                    .into(),
+            })
+        }
+    })
+}
+
+pub(super) fn decode_finish(
+    value: &Value,
+    stream_hint: Option<FinishReason>,
+) -> Result<FinishReason, CoreError> {
     match required_str(value, "status")? {
-        "completed" => Ok(FinishReason::Stop),
-        "incomplete" => Ok(FinishReason::Incomplete),
-        "failed" => Ok(FinishReason::ContentFilter),
+        "completed" => Ok(stream_hint
+            .or_else(|| finish_from_output(value))
+            .unwrap_or(FinishReason::Stop)),
+        "incomplete" => Ok(
+            match value
+                .pointer("/incomplete_details/reason")
+                .and_then(Value::as_str)
+            {
+                Some("max_output_tokens") => FinishReason::Length,
+                Some("content_filter") => FinishReason::ContentFilter,
+                _ => FinishReason::Incomplete,
+            },
+        ),
         status => Err(invalid_payload(&format!(
             "unsupported response status {status}"
         ))),
     }
+}
+
+pub(super) fn decode_failure(value: &Value) -> crate::llm::ir::OperationFailure {
+    let error = value
+        .get("error")
+        .or_else(|| value.pointer("/response/error"))
+        .unwrap_or(value);
+    let code = error
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("generation_failed")
+        .to_owned();
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("generation failed")
+        .to_owned();
+    crate::llm::ir::OperationFailure {
+        retryable: matches!(code.as_str(), "server_error" | "rate_limit_exceeded"),
+        code,
+        message,
+        details: Default::default(),
+    }
+}
+
+fn finish_from_output(value: &Value) -> Option<FinishReason> {
+    let output = value.get("output")?.as_array()?;
+    if output.iter().any(|item| {
+        item.get("type")
+            .and_then(Value::as_str)
+            .is_some_and(requires_client_action)
+    }) {
+        Some(FinishReason::ToolCalls)
+    } else if output.iter().any(output_contains_refusal) {
+        Some(FinishReason::Refusal)
+    } else {
+        None
+    }
+}
+
+pub(super) fn requires_client_action(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_call"
+            | "custom_tool_call"
+            | "computer_call"
+            | "shell_call"
+            | "local_shell_call"
+            | "apply_patch_call"
+            | "mcp_approval_request"
+            | "tool_search_call"
+    )
+}
+
+fn output_contains_refusal(item: &Value) -> bool {
+    item.get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|part| part.get("type").and_then(Value::as_str) == Some("refusal"))
 }
 
 pub(super) fn decode_usage(value: &Value) -> Result<crate::llm::ir::Usage, CoreError> {

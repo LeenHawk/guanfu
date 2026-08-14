@@ -1,13 +1,13 @@
-use std::collections::BTreeMap;
-
 use serde_json::Value;
 
 use super::*;
 use crate::llm::ir::generation::*;
 
 pub(super) struct StreamDecoder {
+    source: OperationKey,
     canonical: OperationKey,
     converter: Option<gproxy_transform::dispatch::StreamConverter>,
+    finish_hint: Option<FinishReason>,
 }
 
 impl StreamDecoder {
@@ -25,8 +25,10 @@ impl StreamDecoder {
             )
         };
         Ok(Self {
+            source: target,
             canonical,
             converter,
+            finish_hint: None,
         })
     }
 
@@ -51,10 +53,17 @@ impl StreamDecoder {
         };
         values
             .into_iter()
-            .filter_map(|value| match decode_stream_event(&value, self.canonical) {
-                Ok(Some(event)) => Some(Ok(OperationEvent::Generate(event))),
-                Ok(None) => None,
-                Err(error) => Some(Err(error)),
+            .filter_map(|value| {
+                match decode_stream_event(
+                    &value,
+                    self.source,
+                    self.canonical,
+                    &mut self.finish_hint,
+                ) {
+                    Ok(Some(event)) => Some(Ok(OperationEvent::Generate(event))),
+                    Ok(None) => None,
+                    Err(error) => Some(Err(error)),
+                }
             })
             .collect()
     }
@@ -85,7 +94,9 @@ fn strict_stream_output(
 
 fn decode_stream_event(
     value: &Value,
+    source: OperationKey,
     target: OperationKey,
+    finish_hint: &mut Option<FinishReason>,
 ) -> Result<Option<GenerateEvent>, CoreError> {
     let kind = value
         .get("type")
@@ -96,28 +107,46 @@ fn decode_stream_event(
             id: crate::llm::ir::GenerationId(pointer_str(value, "/response/id")?.into()),
             model: crate::llm::ir::ModelId(pointer_str(value, "/response/model")?.into()),
         }),
-        "response.output_item.added" => GenerateEvent::OutputStarted(OutputStarted {
-            output_index: u32_field(value, "output_index")?,
-            output_id: crate::llm::ir::OutputId(pointer_str(value, "/item/id")?.into()),
-            kind: output_kind(pointer_str(value, "/item/type")?)?,
-        }),
-        "response.content_part.added" => GenerateEvent::ContentStarted(ContentStarted {
-            output_index: u32_field(value, "output_index")?,
-            content_index: u32_field(value, "content_index")?,
-            content_id: crate::llm::ir::ContentId(format!(
-                "{}:{}",
-                u32_field(value, "output_index")?,
-                u32_field(value, "content_index")?
-            )),
-            kind: content_kind(pointer_str(value, "/part/type")?)?,
-        }),
+        "response.output_item.added" => {
+            let item_kind = pointer_str(value, "/item/type")?;
+            if super::response::requires_client_action(item_kind) {
+                *finish_hint = Some(FinishReason::ToolCalls);
+            }
+            GenerateEvent::OutputStarted(OutputStarted {
+                output_index: u32_field(value, "output_index")?,
+                output_id: crate::llm::ir::OutputId(pointer_str(value, "/item/id")?.into()),
+                kind: output_kind(item_kind)?,
+            })
+        }
+        "response.content_part.added" => {
+            let part_kind = pointer_str(value, "/part/type")?;
+            if part_kind == "refusal" && *finish_hint != Some(FinishReason::ToolCalls) {
+                *finish_hint = Some(FinishReason::Refusal);
+            }
+            GenerateEvent::ContentStarted(ContentStarted {
+                output_index: u32_field(value, "output_index")?,
+                content_index: u32_field(value, "content_index")?,
+                content_id: crate::llm::ir::ContentId(format!(
+                    "{}:{}",
+                    u32_field(value, "output_index")?,
+                    u32_field(value, "content_index")?
+                )),
+                kind: content_kind(part_kind)?,
+            })
+        }
         "response.output_text.delta" => {
             GenerateEvent::Delta(GenerateDelta::Text(content_delta(value)?))
         }
         "response.refusal.delta" => {
+            if *finish_hint != Some(FinishReason::ToolCalls) {
+                *finish_hint = Some(FinishReason::Refusal);
+            }
             GenerateEvent::Delta(GenerateDelta::Refusal(content_delta(value)?))
         }
-        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+        "response.reasoning_summary_text.delta" => {
+            GenerateEvent::Delta(GenerateDelta::ReasoningSummary(content_delta(value)?))
+        }
+        "response.reasoning_text.delta" => {
             GenerateEvent::Delta(GenerateDelta::ReasoningText(content_delta(value)?))
         }
         "response.function_call_arguments.delta" => {
@@ -207,46 +236,52 @@ fn decode_stream_event(
                 u32_field(value, "content_index")?
             )),
         }),
-        "response.output_item.done" => GenerateEvent::OutputFinished(OutputFinished {
-            output_index: u32_field(value, "output_index")?,
-            item: super::response::decode_output_item(
-                value
-                    .get("item")
-                    .ok_or_else(|| invalid_payload("output item is missing"))?,
-            )?,
-        }),
+        "response.output_item.done" => {
+            let item = value
+                .get("item")
+                .ok_or_else(|| invalid_payload("output item is missing"))?;
+            if item
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(super::response::requires_client_action)
+            {
+                *finish_hint = Some(FinishReason::ToolCalls);
+            }
+            GenerateEvent::OutputFinished(OutputFinished {
+                output_index: u32_field(value, "output_index")?,
+                item: super::response::decode_output_item(item, source)?,
+            })
+        }
         "response.completed" => GenerateEvent::Finished(GenerationFinished {
-            finish: FinishReason::Stop,
+            finish: super::response::decode_finish(
+                value
+                    .get("response")
+                    .ok_or_else(|| invalid_payload("completed response is missing"))?,
+                finish_hint.take(),
+            )?,
             usage: value
                 .pointer("/response/usage")
                 .map(super::response::decode_usage)
                 .transpose()?,
         }),
         "response.incomplete" => GenerateEvent::Finished(GenerationFinished {
-            finish: FinishReason::Incomplete,
+            finish: super::response::decode_finish(
+                value
+                    .get("response")
+                    .ok_or_else(|| invalid_payload("incomplete response is missing"))?,
+                finish_hint.take(),
+            )?,
             usage: value
                 .pointer("/response/usage")
                 .map(super::response::decode_usage)
                 .transpose()?,
         }),
         "response.failed" | "error" => GenerateEvent::Failed(GenerationFailure {
-            error: crate::llm::ir::OperationFailure {
-                code: value
-                    .pointer("/response/error/code")
-                    .or_else(|| value.get("code"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("generation_failed")
-                    .into(),
-                message: value
-                    .pointer("/response/error/message")
-                    .or_else(|| value.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("generation failed")
-                    .into(),
-                retryable: false,
-                details: BTreeMap::new(),
-            },
-            usage: None,
+            error: super::response::decode_failure(value),
+            usage: value
+                .pointer("/response/usage")
+                .map(super::response::decode_usage)
+                .transpose()?,
         }),
         "response.in_progress"
         | "response.queued"

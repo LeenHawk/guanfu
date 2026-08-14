@@ -1,4 +1,4 @@
-# Pipeline 与 Assets 机制设计（草案）
+# Pipeline 与 Assets 机制设计（已归档草案）
 
 依据 `sillytavern-resource-formats.md` 的调查结论。目标：
 

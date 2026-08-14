@@ -66,8 +66,8 @@ pub enum ContentKind {
 pub enum GenerateDelta {
     Text(ContentTextDelta),
     Refusal(ContentTextDelta),
+    ReasoningSummary(ContentTextDelta),
     ReasoningText(ContentTextDelta),
-    ReasoningSignature(OutputTextDelta),
     Compaction(CompactionDelta),
     FunctionArguments(JsonFragmentDelta),
     CustomToolInput(OutputTextDelta),

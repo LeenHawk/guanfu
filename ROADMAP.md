@@ -60,6 +60,9 @@
 
 目标：应用主体。
 
+详细设计与分步提交以 `dev_docs/roleplay-assets-plan.md` 为准；协议实现缺口见
+`dev_docs/protocol-gap-audit.md`。
+
 - [ ] 实体：角色卡（character）、用户 persona、会话（conversation）、消息（message）——entity-first 直接加表
 - [ ] 提示词组装：角色卡 + persona + 历史；token 预算（count + compact 能力）
 - [ ] 聊天 UI：流式渲染、markdown、消息重试；编辑 / 分支可后置

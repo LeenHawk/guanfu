@@ -95,7 +95,7 @@ pub fn decode(
                 request_capability(request.operation()),
             )?;
             Ok(DecodedResponse::Complete(response::decode_json(
-                request, canonical, &body,
+                request, target, &body,
             )?))
         }
         (OperationRequest::Images(image_request), WireResponse::JsonSse(response)) => {

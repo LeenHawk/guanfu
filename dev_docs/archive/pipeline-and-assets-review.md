@@ -1,4 +1,4 @@
-# Pipeline、Assets 与 IR 设计评审
+# Pipeline、Assets 与 IR 设计评审（已归档）
 
 本文对照以下内容整理：
 

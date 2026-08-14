@@ -75,28 +75,63 @@ pub(in crate::llm::codec) fn encode_input(
         .collect::<Result<Vec<_>, CoreError>>()?;
     values.extend(
         input
-        .iter()
-        .map(|item| match item {
-            InputItem::Message { message } => Ok(json!({
-                "type": "message",
-                "role": match message.role {
-                    MessageRole::System => "system",
-                    MessageRole::User => "user",
-                    MessageRole::Assistant => "assistant",
-                },
-                "content": encode_content(&message.content)?,
-            })),
-            InputItem::ToolResult { result } => encode_tool_result(result),
-            InputItem::Reasoning { reasoning } => Ok(json!({
-                "type": "reasoning",
-                "id": reasoning.previous.id.0,
-                "summary": reasoning.previous.summary.iter().map(|text| json!({"type":"summary_text","text":text})).collect::<Vec<_>>(),
-                "encrypted_content": reasoning.previous.encrypted_content,
-            })),
-        })
-        .collect::<Result<Vec<_>, CoreError>>()?,
+            .iter()
+            .map(|item| match item {
+                InputItem::Message { message } => Ok(json!({
+                    "type": "message",
+                    "role": match message.role {
+                        MessageRole::System => "system",
+                        MessageRole::User => "user",
+                        MessageRole::Assistant => "assistant",
+                    },
+                    "content": encode_content(&message.content)?,
+                })),
+                InputItem::ToolResult { result } => encode_tool_result(result),
+                InputItem::Reasoning { reasoning } => Ok(encode_reasoning_input(reasoning)),
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?,
     );
     Ok(Value::Array(values))
+}
+
+fn encode_reasoning_input(reasoning: &ReasoningInput) -> Value {
+    let mut item = Map::new();
+    item.insert("type".into(), Value::String("reasoning".into()));
+    item.insert("id".into(), json!(reasoning.previous.id.0));
+
+    let mut summary = Vec::new();
+    let mut content = Vec::new();
+    let mut continuation = None;
+    for part in &reasoning.previous.parts {
+        match part {
+            ReasoningPart::Summary { text } => {
+                summary.push(json!({"type":"summary_text","text":text}));
+            }
+            ReasoningPart::Text {
+                text,
+                continuation: part_continuation,
+            } => {
+                content.push(json!({"type":"reasoning_text","text":text}));
+                continuation = continuation.or(part_continuation.as_ref());
+            }
+            ReasoningPart::Opaque {
+                continuation: part_continuation,
+            } => {
+                continuation = continuation.or(Some(part_continuation));
+            }
+        }
+    }
+    item.insert("summary".into(), Value::Array(summary));
+    if !content.is_empty() {
+        item.insert("content".into(), Value::Array(content));
+    }
+    if let Some(continuation) = continuation {
+        item.insert(
+            "encrypted_content".into(),
+            Value::String(continuation.opaque_value().into()),
+        );
+    }
+    Value::Object(item)
 }
 
 fn encode_content(content: &[InputContent]) -> Result<Value, CoreError> {

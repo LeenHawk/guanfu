@@ -81,12 +81,46 @@ pub enum CitationSource {
     Document { document_id: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ReasoningOutput {
     pub id: OutputId,
-    pub summary: Vec<String>,
-    pub encrypted_content: Option<String>,
-    pub signature: Option<String>,
+    pub parts: Vec<ReasoningPart>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReasoningPart {
+    Summary {
+        text: String,
+    },
+    Text {
+        text: String,
+        continuation: Option<ReasoningContinuation>,
+    },
+    Opaque {
+        continuation: ReasoningContinuation,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReasoningContinuation {
+    OpenAiEncrypted { content: String },
+    ClaudeSignature { signature: String },
+    ClaudeRedacted { data: String },
+    GeminiThoughtSignature { signature: String },
+}
+
+impl ReasoningContinuation {
+    pub fn opaque_value(&self) -> &str {
+        match self {
+            Self::OpenAiEncrypted { content } => content,
+            Self::ClaudeSignature { signature } | Self::GeminiThoughtSignature { signature } => {
+                signature
+            }
+            Self::ClaudeRedacted { data } => data,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]

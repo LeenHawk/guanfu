@@ -6,13 +6,15 @@ mod stream;
 mod tests;
 
 use bytes::Bytes;
-use gproxy_protocol::{ContentGenerationKind, Operation, OperationKey};
+use gproxy_protocol::{ContentGenerationKind, Operation, OperationKey, OperationKind};
 use gproxy_transform::{dispatch, resolve, TransformContext};
 use http::HeaderMap;
 use serde_json::{Map, Value};
 
 use super::{DecodedResponse, OperationEvent};
-use crate::llm::ir::generation::{GenerateMode, GenerateRequest};
+use crate::llm::ir::generation::{
+    GenerateMode, GenerateRequest, InputItem, ReasoningContinuation, ReasoningPart,
+};
 use crate::llm::wire::{
     JsonBody, JsonSseData, QueryParam, RequestBody, ResponseMode, WireRequest, WireResponse,
 };
@@ -21,6 +23,7 @@ use crate::CoreError;
 const CANONICAL_KIND: ContentGenerationKind = ContentGenerationKind::OpenAiResponses;
 
 pub fn encode(request: &GenerateRequest, target: OperationKey) -> Result<WireRequest, CoreError> {
+    validate_reasoning_continuations(request, target)?;
     let source = OperationKey::content_generation(request.operation(), CANONICAL_KIND);
     let canonical = JsonBody::encode(&request::encode_request(request)?)?;
     let transformed = transform_request(source, target, canonical)?;
@@ -51,6 +54,59 @@ pub fn encode(request: &GenerateRequest, target: OperationKey) -> Result<WireReq
     })
 }
 
+fn validate_reasoning_continuations(
+    request: &GenerateRequest,
+    target: OperationKey,
+) -> Result<(), CoreError> {
+    let OperationKind::ContentGeneration(kind) = target.kind() else {
+        return Err(CoreError::InvalidProviderPayload {
+            target,
+            reason: "target is not a content generation kind".into(),
+        });
+    };
+    let compatible = request.input.iter().all(|item| {
+        let InputItem::Reasoning { reasoning } = item else {
+            return true;
+        };
+        reasoning.previous.parts.iter().all(|part| {
+            let continuation = match part {
+                ReasoningPart::Text {
+                    continuation: Some(continuation),
+                    ..
+                }
+                | ReasoningPart::Opaque { continuation } => continuation,
+                _ => return true,
+            };
+            continuation_matches(continuation, kind)
+        })
+    });
+    if compatible {
+        Ok(())
+    } else {
+        Err(CoreError::IncompatibleRoute {
+            target,
+            fields: vec!["input.reasoning.continuation".into()],
+        })
+    }
+}
+
+fn continuation_matches(continuation: &ReasoningContinuation, kind: ContentGenerationKind) -> bool {
+    match continuation {
+        ReasoningContinuation::OpenAiEncrypted { .. } => matches!(
+            kind,
+            ContentGenerationKind::OpenAiResponses
+                | ContentGenerationKind::OpenAiResponsesWebSocket
+        ),
+        ReasoningContinuation::ClaudeSignature { .. }
+        | ReasoningContinuation::ClaudeRedacted { .. } => {
+            kind == ContentGenerationKind::ClaudeMessages
+        }
+        ReasoningContinuation::GeminiThoughtSignature { .. } => {
+            kind == ContentGenerationKind::GeminiGenerateContent
+        }
+    }
+}
+
 pub fn decode(
     request: &GenerateRequest,
     target: OperationKey,
@@ -61,7 +117,9 @@ pub fn decode(
         WireResponse::Json(response) if request.mode == GenerateMode::Complete => {
             let body = transform_response(target, canonical, response.body)?;
             Ok(DecodedResponse::Complete(
-                crate::llm::ir::OperationResponse::Generate(response::decode_complete(&body)?),
+                crate::llm::ir::OperationResponse::Generate(response::decode_complete(
+                    &body, target,
+                )?),
             ))
         }
         WireResponse::JsonSse(response) if request.mode == GenerateMode::Stream => {

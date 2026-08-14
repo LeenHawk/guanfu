@@ -11,8 +11,8 @@ import type { ToolExecutionDelta } from "./ToolExecutionDelta";
 export type GenerateDelta =
   | { type: "text"; data: ContentTextDelta }
   | { type: "refusal"; data: ContentTextDelta }
+  | { type: "reasoning_summary"; data: ContentTextDelta }
   | { type: "reasoning_text"; data: ContentTextDelta }
-  | { type: "reasoning_signature"; data: OutputTextDelta }
   | { type: "compaction"; data: CompactionDelta }
   | { type: "function_arguments"; data: JsonFragmentDelta }
   | { type: "custom_tool_input"; data: OutputTextDelta }

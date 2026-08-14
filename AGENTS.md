@@ -32,6 +32,11 @@ backend/core/      共享业务核心（SeaORM）
 backend/server/    Axum 服务端
 ```
 
+## 设计文档
+
+- `dev_docs/` 中未归档的文档描述当前设计与实施计划。
+- `dev_docs/archive/` 只保存已经被后续裁决取代的历史方案。除非任务明确要求追溯设计历史、核对旧决策或处理归档文档，否则不要读取该目录。
+
 ## 常用命令
 
 pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：

@@ -61,6 +61,9 @@ pub enum CoreError {
 
     #[error("upstream returned status {status}")]
     Upstream { status: u16, body: String },
+
+    #[error("generation failed: {0:?}")]
+    OperationFailed(crate::llm::ir::OperationFailure),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -122,6 +125,13 @@ impl CoreError {
             Self::Upstream { status, .. } => (
                 ErrorCode::UpstreamRejected,
                 Some(json!({ "status": status })),
+            ),
+            Self::OperationFailed(failure) => (
+                ErrorCode::UpstreamRejected,
+                Some(json!({
+                    "operation_code": failure.code,
+                    "retryable": failure.retryable,
+                })),
             ),
         };
         ApiError { code, details }

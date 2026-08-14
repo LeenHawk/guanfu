@@ -271,7 +271,7 @@ fn decode_compact(value: &Value, target: OperationKey) -> Result<CompactResponse
                 }
             }
         }
-        let item = crate::llm::codec::generation::response::decode_output_item(item)?;
+        let item = crate::llm::codec::generation::response::decode_output_item(item, target)?;
         if let crate::llm::ir::generation::OutputItem::Compaction(compaction) = &item {
             encrypted_content = Some(compaction.encrypted_content.clone());
         }
