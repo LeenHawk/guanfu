@@ -6,6 +6,8 @@ import type { Instruction } from "./Instruction";
 import type { ModelId } from "./ModelId";
 import type { OutputConstraint } from "./OutputConstraint";
 import type { OutputModality } from "./OutputModality";
+import type { ProtocolOptions } from "./ProtocolOptions";
+import type { ReasoningOptions } from "./ReasoningOptions";
 import type { SamplingOptions } from "./SamplingOptions";
 import type { ToolChoice } from "./ToolChoice";
 import type { ToolDefinition } from "./ToolDefinition";
@@ -18,6 +20,8 @@ export type GenerateRequest = {
   tool_choice: ToolChoice;
   output: OutputConstraint;
   sampling: SamplingOptions;
+  reasoning: ReasoningOptions | null;
+  protocol_options: Array<ProtocolOptions>;
   limits: GenerationLimits;
   modalities: Array<OutputModality>;
   mode: GenerateMode;

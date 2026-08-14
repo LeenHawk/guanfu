@@ -27,6 +27,8 @@ fn request(mode: GenerateMode) -> GenerateRequest {
         tool_choice: ToolChoice::Auto,
         output: OutputConstraint::Text,
         sampling: SamplingOptions::default(),
+        reasoning: None,
+        protocol_options: Vec::new(),
         limits: GenerationLimits {
             max_output_tokens: Some(32),
             max_tool_calls: None,
@@ -34,6 +36,10 @@ fn request(mode: GenerateMode) -> GenerateRequest {
         modalities: vec![OutputModality::Text],
         mode,
     }
+}
+
+fn json_patch(value: Value) -> JsonMergePatch {
+    JsonMergePatch(serde_json::from_value(value).unwrap())
 }
 
 fn metadata() -> ResponseMetadata {
@@ -56,6 +62,98 @@ fn encodes_semantic_request_as_claude_messages() {
     let value: Value = body.decode().unwrap();
     assert_eq!(value["model"], "claude-test");
     assert_eq!(value["messages"][0]["content"][0]["text"], "hi");
+}
+
+#[test]
+fn encodes_sampling_and_historical_system_for_openai_chat() {
+    let mut request = request(GenerateMode::Complete);
+    request.input.push(InputItem::Message {
+        message: Message {
+            role: MessageRole::System,
+            content: vec![InputContent::Text {
+                text: "world info".into(),
+            }],
+        },
+    });
+    request.sampling = SamplingOptions {
+        temperature: Some(0.7),
+        top_p: Some(0.9),
+        seed: Some(42),
+        stop: vec!["STOP".into()],
+        frequency_penalty: Some(0.2),
+        presence_penalty: Some(0.3),
+        ..Default::default()
+    };
+    let target = OperationKey::content_generation(
+        Operation::GenerateContent,
+        ContentGenerationKind::OpenAiChatCompletions,
+    );
+    let encoded = encode(&request, target).unwrap();
+    let RequestBody::Json(body) = encoded.body else {
+        panic!("expected JSON body")
+    };
+    let value: Value = body.decode().unwrap();
+    assert_eq!(value["messages"][1]["role"], "system");
+    assert_eq!(value["seed"], 42);
+    assert_eq!(value["stop"], json!(["STOP"]));
+    assert!((value["frequency_penalty"].as_f64().unwrap() - 0.2).abs() < 1e-6);
+    assert!((value["presence_penalty"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+}
+
+#[test]
+fn applies_only_matching_protocol_overlay_after_sampling() {
+    let mut request = request(GenerateMode::Complete);
+    request.sampling.top_k = Some(12);
+    request.protocol_options = vec![
+        ProtocolOptions {
+            kind: GenerationProtocol::OpenAiChatCompletions,
+            patch: json_patch(json!({"service_tier":"priority"})),
+        },
+        ProtocolOptions {
+            kind: GenerationProtocol::GeminiGenerateContent,
+            patch: json_patch(json!({
+                "model":"overridden-model",
+                "generationConfig":{"topK":99},
+                "safetySettings":[{"category":"HARM_CATEGORY_HATE_SPEECH","threshold":"BLOCK_NONE"}]
+            })),
+        },
+    ];
+    let target = OperationKey::content_generation(
+        Operation::GenerateContent,
+        ContentGenerationKind::GeminiGenerateContent,
+    );
+    let encoded = encode(&request, target).unwrap();
+    let RequestBody::Json(body) = encoded.body else {
+        panic!("expected JSON body")
+    };
+    let value: Value = body.decode().unwrap();
+    assert_eq!(value["model"], "claude-test");
+    assert_eq!(value["generationConfig"]["topK"], 99);
+    assert!(value.get("service_tier").is_none());
+    assert_eq!(value["safetySettings"][0]["threshold"], "BLOCK_NONE");
+}
+
+#[test]
+fn maps_reasoning_budget_and_summary_to_claude() {
+    let mut request = request(GenerateMode::Complete);
+    request.reasoning = Some(ReasoningOptions {
+        effort: Some(ReasoningEffort::High),
+        budget_tokens: Some(2048),
+        summary: Some(ReasoningSummary::Auto),
+    });
+    let target = OperationKey::content_generation(
+        Operation::GenerateContent,
+        ContentGenerationKind::ClaudeMessages,
+    );
+    let encoded = encode(&request, target).unwrap();
+    let RequestBody::Json(body) = encoded.body else {
+        panic!("expected JSON body")
+    };
+    let value: Value = body.decode().unwrap();
+    assert_eq!(value["thinking"]["type"], "enabled");
+    assert_eq!(value["thinking"]["budget_tokens"], 2048);
+    assert_eq!(value["thinking"]["display"], "summarized");
+    assert_eq!(value["output_config"]["effort"], "high");
 }
 
 #[test]

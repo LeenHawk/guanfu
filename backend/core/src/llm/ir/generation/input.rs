@@ -33,6 +33,7 @@ pub struct Message {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
+    System,
     User,
     Assistant,
 }

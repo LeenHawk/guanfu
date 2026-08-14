@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::llm::ir::generation::*;
-use crate::llm::ir::{Capability, FileId, MediaSource};
+use crate::llm::ir::{FileId, MediaSource};
 
 pub(super) fn encode_request(request: &GenerateRequest) -> Result<Value, CoreError> {
     let mut body = Map::new();
@@ -29,8 +29,9 @@ pub(super) fn encode_request(request: &GenerateRequest) -> Result<Value, CoreErr
         encode_tool_choice(&request.tool_choice),
     );
     body.insert("text".into(), encode_output_constraint(&request.output));
-    insert_option(&mut body, "temperature", request.sampling.temperature);
-    insert_option(&mut body, "top_p", request.sampling.top_p);
+    if let Some(reasoning) = encode_reasoning(request.reasoning.as_ref()) {
+        body.insert("reasoning".into(), reasoning);
+    }
     insert_option(
         &mut body,
         "max_output_tokens",
@@ -78,7 +79,11 @@ pub(in crate::llm::codec) fn encode_input(
         .map(|item| match item {
             InputItem::Message { message } => Ok(json!({
                 "type": "message",
-                "role": match message.role { MessageRole::User => "user", MessageRole::Assistant => "assistant" },
+                "role": match message.role {
+                    MessageRole::System => "system",
+                    MessageRole::User => "user",
+                    MessageRole::Assistant => "assistant",
+                },
                 "content": encode_content(&message.content)?,
             })),
             InputItem::ToolResult { result } => encode_tool_result(result),
@@ -253,50 +258,14 @@ fn encode_output_constraint(output: &OutputConstraint) -> Value {
     }
 }
 
-pub(super) fn validate_capabilities(
-    request: &GenerateRequest,
-    target: OperationKey,
-) -> Result<(), CoreError> {
-    for (enabled, capability) in [
-        (request.sampling.top_k.is_some(), Capability::TopKSampling),
-        (request.sampling.seed.is_some(), Capability::SeededSampling),
-        (!request.sampling.stop.is_empty(), Capability::StopSequences),
-    ] {
-        if enabled {
-            return Err(CoreError::UnsupportedCapability { capability, target });
-        }
+fn encode_reasoning(reasoning: Option<&ReasoningOptions>) -> Option<Value> {
+    let reasoning = reasoning?;
+    let mut value = Map::new();
+    if let Some(effort) = reasoning.effort {
+        value.insert("effort".into(), Value::String(snake(&effort)));
     }
-    for tool in &request.tools {
-        let capability = match tool {
-            ToolDefinition::Function(_) => Capability::FunctionTool,
-            ToolDefinition::Custom(_) => Capability::CustomTool,
-            ToolDefinition::WebSearch(_) => Capability::WebSearchTool,
-            ToolDefinition::WebFetch(_) => Capability::WebFetchTool,
-            ToolDefinition::FileSearch(_) => Capability::FileSearchTool,
-            ToolDefinition::ComputerUse(_) => Capability::ComputerUseTool,
-            ToolDefinition::CodeExecution(_) => Capability::CodeExecutionTool,
-            ToolDefinition::Shell(_) => Capability::ShellTool,
-            ToolDefinition::TextEditor(_) => Capability::TextEditorTool,
-            ToolDefinition::ImageGeneration(_) => Capability::ImageGenerationTool,
-            ToolDefinition::Mcp(_) => Capability::McpTool,
-            ToolDefinition::Memory(_) => Capability::MemoryTool,
-            ToolDefinition::ToolSearch(_) => Capability::ToolSearchTool,
-        };
-        let source = OperationKey::content_generation(request.operation(), CANONICAL_KIND);
-        if target != source {
-            let probe = GenerateRequest {
-                tools: vec![tool.clone()],
-                ..request.clone()
-            };
-            let canonical = JsonBody::encode(&encode_request(&probe)?)?;
-            let pair = resolve(source, target).map_err(transform_error)?;
-            let ctx = TransformContext::new(source, target);
-            let transformed = dispatch::request_bytes_detailed(pair, &ctx, canonical.as_bytes())
-                .map_err(transform_error)?;
-            if !transformed.diagnostics.is_empty() {
-                return Err(CoreError::UnsupportedCapability { capability, target });
-            }
-        }
+    if let Some(summary) = reasoning.summary {
+        value.insert("summary".into(), Value::String(snake(&summary)));
     }
-    Ok(())
+    (!value.is_empty()).then_some(Value::Object(value))
 }

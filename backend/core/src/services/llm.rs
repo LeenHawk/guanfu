@@ -99,7 +99,10 @@ impl LlmService {
             };
             let wire_request = match ProviderCodec::encode(&request, target_key) {
                 Ok(request) => request,
-                Err(error @ CoreError::UnsupportedCapability { .. }) => {
+                Err(
+                    error @ (CoreError::UnsupportedCapability { .. }
+                    | CoreError::IncompatibleRoute { .. }),
+                ) => {
                     last_error = Some(error);
                     continue;
                 }

@@ -41,6 +41,12 @@ pub enum CoreError {
         target: gproxy_protocol::OperationKey,
     },
 
+    #[error("target {target:?} cannot preserve request fields {fields:?}")]
+    IncompatibleRoute {
+        target: gproxy_protocol::OperationKey,
+        fields: Vec<String>,
+    },
+
     #[error("unmodeled provider event for {target:?}: {event}")]
     UnmodeledProviderEvent {
         target: gproxy_protocol::OperationKey,
@@ -105,6 +111,10 @@ impl CoreError {
             Self::UnsupportedCapability { capability, .. } => (
                 ErrorCode::UnsupportedCapability,
                 Some(json!({ "capability": capability })),
+            ),
+            Self::IncompatibleRoute { fields, .. } => (
+                ErrorCode::UnsupportedCapability,
+                Some(json!({ "fields": fields })),
             ),
             Self::UnmodeledProviderEvent { .. } | Self::InvalidProviderPayload { .. } => {
                 (ErrorCode::InvalidData, None)

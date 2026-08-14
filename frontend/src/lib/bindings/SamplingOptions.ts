@@ -6,4 +6,6 @@ export type SamplingOptions = {
   top_k: number | null;
   seed: number | null;
   stop: Array<string>;
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
 };

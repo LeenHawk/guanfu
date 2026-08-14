@@ -1,3 +1,4 @@
+mod options;
 pub(in crate::llm::codec) mod request;
 pub(in crate::llm::codec) mod response;
 mod stream;
@@ -20,10 +21,12 @@ use crate::CoreError;
 const CANONICAL_KIND: ContentGenerationKind = ContentGenerationKind::OpenAiResponses;
 
 pub fn encode(request: &GenerateRequest, target: OperationKey) -> Result<WireRequest, CoreError> {
-    request::validate_capabilities(request, target)?;
     let source = OperationKey::content_generation(request.operation(), CANONICAL_KIND);
     let canonical = JsonBody::encode(&request::encode_request(request)?)?;
-    let body = transform_request(source, target, canonical)?;
+    let transformed = transform_request(source, target, canonical)?;
+    let mut value = transformed.decode()?;
+    options::apply(request, target, &mut value)?;
+    let body = JsonBody::encode(&value)?;
     let endpoint = gproxy_protocol::endpoint::request_target(
         target,
         &request.model.0,
@@ -96,10 +99,14 @@ fn transform_request(
     let output =
         dispatch::request_bytes_detailed(pair, &ctx, body.as_bytes()).map_err(transform_error)?;
     if !output.diagnostics.is_empty() {
-        return Err(CoreError::Transform(format!(
-            "semantic loss while encoding request: {:?}",
-            output.diagnostics
-        )));
+        return Err(CoreError::IncompatibleRoute {
+            target,
+            fields: output
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| diagnostic.field)
+                .collect(),
+        });
     }
     JsonBody::from_bytes(Bytes::from(output.value))
 }

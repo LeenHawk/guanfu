@@ -1,9 +1,11 @@
 mod input;
+mod options;
 mod output;
 mod stream;
 mod tools;
 
 pub use input::*;
+pub use options::*;
 pub use output::*;
 pub use stream::*;
 pub use tools::*;
@@ -28,18 +30,12 @@ pub struct GenerateRequest {
     pub tool_choice: ToolChoice,
     pub output: OutputConstraint,
     pub sampling: SamplingOptions,
+    pub reasoning: Option<ReasoningOptions>,
+    #[serde(default)]
+    pub protocol_options: Vec<ProtocolOptions>,
     pub limits: GenerationLimits,
     pub modalities: Vec<OutputModality>,
     pub mode: GenerateMode,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-pub struct SamplingOptions {
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
-    pub top_k: Option<u32>,
-    pub seed: Option<i64>,
-    pub stop: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
