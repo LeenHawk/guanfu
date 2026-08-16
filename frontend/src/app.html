@@ -11,6 +11,9 @@
         (savedTheme === "system" &&
           matchMedia("(prefers-color-scheme: dark)").matches);
       document.documentElement.classList.toggle("dark", dark);
+      document.getElementById("app-favicon").href = dark
+        ? "%sveltekit.assets%/favicon-dark.svg"
+        : "%sveltekit.assets%/favicon.png";
     </script>
     <title>观复</title>
     %sveltekit.head%

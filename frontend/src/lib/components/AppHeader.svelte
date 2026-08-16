@@ -3,21 +3,24 @@
   import { getLocale, setLocale } from "$lib/paraglide/runtime.js";
   import { applyTheme, savedTheme, type Theme } from "$lib/ui/theme";
 
-  let theme = $state<Theme>("system");
+  let theme = $state<Theme>(savedTheme());
   let locale = $state(getLocale());
 
   $effect(() => {
-    theme = savedTheme();
     applyTheme(theme);
+  });
+
+  $effect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
-    const update = () => theme === "system" && applyTheme(theme);
+    const update = () => {
+      if (savedTheme() === "system") applyTheme("system");
+    };
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   });
 
   function changeTheme(event: Event) {
     theme = (event.currentTarget as HTMLSelectElement).value as Theme;
-    applyTheme(theme);
   }
 
   function changeLocale(event: Event) {
