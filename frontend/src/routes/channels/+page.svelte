@@ -5,8 +5,10 @@
   import type { RoutingOperation } from "$lib/bindings/RoutingOperation";
   import type { RoutingRuleDto } from "$lib/bindings/RoutingRuleDto";
   import { api } from "$lib/api/channels";
+  import { isTauri } from "$lib/api/transport";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
+  import AccountPanel from "$lib/components/AccountPanel.svelte";
   import AuthGate from "$lib/components/AuthGate.svelte";
   import { authApi } from "$lib/api/auth";
   import ChannelDialog from "$lib/components/ChannelDialog.svelte";
@@ -231,6 +233,14 @@
       {:else}
         <main class="center-state"><p>{m.select_channel()}</p></main>
       {/if}
+    </div>
+  {/if}
+  {#if !isTauri()}
+    <div class="account-area">
+      <AccountPanel
+        onerror={captureError}
+        onsignedout={() => (errorCode = "unauthorized")}
+      />
     </div>
   {/if}
 </div>

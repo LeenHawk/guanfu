@@ -150,5 +150,14 @@
   "shared": "Shared",
   "private": "Private",
   "share": "Share with everyone",
-  "unshare": "Make private"
+  "unshare": "Make private",
+  "account": "Account",
+  "sessions": "Sessions",
+  "session_current": "This device",
+  "revoke": "Revoke",
+  "revoke_others": "Sign out other devices",
+  "session_created": "Signed in",
+  "session_expires": "Expires",
+  "no_other_sessions": "No sessions on other devices",
+  "load_earlier": "Load {count} earlier messages"
 }

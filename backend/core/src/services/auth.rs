@@ -55,6 +55,16 @@ pub struct SessionDto {
     pub user: UserDto,
 }
 
+/// 会话视图;`id` 是令牌的哈希,不是令牌本身。
+#[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
+pub struct SessionSummary {
+    pub id: String,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// 是否为发起本次请求的会话。
+    pub current: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct Credentials {
     pub name: String,
@@ -161,6 +171,60 @@ impl AuthService {
         ))
     }
 
+    /// 列出自己的会话;`current` 标出发起本次请求的那一个。
+    ///
+    /// 只回 token 的哈希前缀作标识——完整令牌不该再出现第二次,
+    /// 哪怕是给本人看。
+    pub async fn list_sessions(
+        db: &impl ConnectionTrait,
+        actor: Actor,
+        current_token: Option<&str>,
+    ) -> Result<Vec<SessionSummary>, CoreError> {
+        let current = current_token.map(token_hash);
+        Ok(session::Entity::find()
+            .filter(session::Column::UserId.eq(actor.user_id))
+            .order_by_desc(session::Column::CreatedAt)
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|row| SessionSummary {
+                current: current.as_deref() == Some(row.token_hash.as_str()),
+                id: row.token_hash,
+                created_at_ms: to_millis(row.created_at),
+                expires_at_ms: to_millis(row.expires_at),
+            })
+            .collect())
+    }
+
+    /// 吊销一个会话。只能吊销自己的——`id` 是会话哈希,
+    /// 猜到别人的哈希也动不了别人的会话。
+    pub async fn revoke_session(
+        db: &impl ConnectionTrait,
+        actor: Actor,
+        id: &str,
+    ) -> Result<(), CoreError> {
+        session::Entity::delete_many()
+            .filter(session::Column::TokenHash.eq(id))
+            .filter(session::Column::UserId.eq(actor.user_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// 吊销自己的全部会话(可保留当前这一个)。
+    pub async fn revoke_all_sessions(
+        db: &impl ConnectionTrait,
+        actor: Actor,
+        keep_token: Option<&str>,
+    ) -> Result<u64, CoreError> {
+        let mut query =
+            session::Entity::delete_many().filter(session::Column::UserId.eq(actor.user_id));
+        if let Some(keep) = keep_token {
+            query = query.filter(session::Column::TokenHash.ne(token_hash(keep)));
+        }
+        Ok(query.exec(db).await?.rows_affected)
+    }
+
     pub async fn logout(db: &impl ConnectionTrait, token: &str) -> Result<(), CoreError> {
         session::Entity::delete_by_id(token_hash(token))
             .exec(db)
@@ -235,6 +299,10 @@ fn new_token() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
+}
+
+fn to_millis(at: OffsetDateTime) -> i64 {
+    (at.unix_timestamp_nanos() / 1_000_000) as i64
 }
 
 fn token_hash(token: &str) -> String {

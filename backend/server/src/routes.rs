@@ -43,6 +43,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/assets/{id}/share", axum::routing::put(share_asset))
         .route("/api/users", get(list_users))
         .route(
+            "/api/auth/sessions",
+            get(list_sessions).delete(revoke_other_sessions),
+        )
+        .route("/api/auth/sessions/{id}", delete(revoke_session))
+        .route("/api/auth/logout", axum::routing::post(logout))
+        .route(
             "/api/characters/import",
             axum::routing::post(import_character),
         )
@@ -117,12 +123,8 @@ async fn register(
     headers: axum::http::HeaderMap,
     Json(input): Json<RegisterInput>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let presented = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    let actor = match presented {
-        Some(token) => Some(AuthService::actor_for(&state.db, token).await?.0),
+    let actor = match presented_token(&headers) {
+        Some(token) => Some(AuthService::actor_for(&state.db, &token).await?.0),
         None => None,
     };
     if AuthService::needs_setup(&state.db).await? {
@@ -215,6 +217,55 @@ async fn share_asset(
 
 async fn list_users(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(AuthService::list_users(&state.db).await?))
+}
+
+async fn list_sessions(
+    State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    headers: axum::http::HeaderMap,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        AuthService::list_sessions(&state.db, actor, presented_token(&headers).as_deref()).await?,
+    ))
+}
+
+async fn revoke_session(
+    State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    AuthService::revoke_session(&state.db, actor, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 吊销除当前会话外的全部会话——"在其他设备上登出"。
+async fn revoke_other_sessions(
+    State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    headers: axum::http::HeaderMap,
+) -> Result<impl IntoResponse, HttpError> {
+    let revoked =
+        AuthService::revoke_all_sessions(&state.db, actor, presented_token(&headers).as_deref())
+            .await?;
+    Ok(Json(serde_json::json!({ "revoked": revoked })))
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<StatusCode, HttpError> {
+    if let Some(token) = presented_token(&headers) {
+        AuthService::logout(&state.db, &token).await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn presented_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::to_owned)
 }
 
 #[derive(serde::Deserialize)]

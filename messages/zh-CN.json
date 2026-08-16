@@ -150,5 +150,14 @@
   "shared": "已共享",
   "private": "私有",
   "share": "共享给所有人",
-  "unshare": "取消共享"
+  "unshare": "取消共享",
+  "account": "账号",
+  "sessions": "登录会话",
+  "session_current": "当前设备",
+  "revoke": "吊销",
+  "revoke_others": "在其他设备上登出",
+  "session_created": "登录于",
+  "session_expires": "到期",
+  "no_other_sessions": "没有其他设备的会话",
+  "load_earlier": "还有 {count} 条更早的消息,点击展开"
 }

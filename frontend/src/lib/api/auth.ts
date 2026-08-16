@@ -1,6 +1,7 @@
 import type { AssetHeadDto } from "$lib/bindings/AssetHeadDto";
 import type { Credentials } from "$lib/bindings/Credentials";
 import type { SessionDto } from "$lib/bindings/SessionDto";
+import type { SessionSummary } from "$lib/bindings/SessionSummary";
 import type { UserDto } from "$lib/bindings/UserDto";
 import { isTauri, requestJson, setAuthToken } from "$lib/api/transport";
 
@@ -33,7 +34,24 @@ export const authApi = {
     return session;
   },
 
-  logout: (): void => setAuthToken(null),
+  /** 服务端吊销当前会话,再清掉本地令牌。 */
+  logout: async (): Promise<void> => {
+    try {
+      await requestJson("/api/auth/logout", { method: "POST" });
+    } finally {
+      setAuthToken(null);
+    }
+  },
+
+  listSessions: (): Promise<SessionSummary[]> =>
+    requestJson("/api/auth/sessions"),
+
+  revokeSession: (id: string): Promise<void> =>
+    requestJson(`/api/auth/sessions/${id}`, { method: "DELETE" }),
+
+  /** 在其他设备上登出;当前会话保留。 */
+  revokeOthers: (): Promise<{ revoked: number }> =>
+    requestJson("/api/auth/sessions", { method: "DELETE" }),
 
   listUsers: (): Promise<UserDto[]> => requestJson("/api/users"),
 
