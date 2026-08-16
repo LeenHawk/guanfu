@@ -25,6 +25,7 @@
   let voice = $state("alloy");
   let status = $state<"idle" | "connecting" | "ready">("idle");
   let transcript = $state("");
+  let typed = $state("");
 
   let session: RealtimeSession | null = null;
   let context: AudioContext | null = null;
@@ -75,7 +76,9 @@
           session: {
             model,
             instructions: [],
-            modalities: ["audio", "text"],
+            // 上游只接受 ["text"] 或 ["audio"],不接受两者并存;
+            // 语音通话取 audio,文字由输入/输出转写单独给出。
+            modalities: ["audio"],
             voice,
             speed: null,
             input_audio_format: { type: "pcm16", rate: REALTIME_RATE },
@@ -117,6 +120,23 @@
       onerror(error);
       hangup();
     }
+  }
+
+  /// 打字发言:合成麦克风或嘈杂环境下仍能推进一轮对话。
+  function sendTyped(event: SubmitEvent) {
+    event.preventDefault();
+    const text = typed.trim();
+    if (!text || !session) return;
+    typed = "";
+    transcript += `\n> ${text}\n`;
+    session.send({
+      type: "create_item",
+      item: {
+        type: "message",
+        message: { role: "user", content: [{ type: "text", text }] },
+      },
+    });
+    session.send({ type: "create_response" });
   }
 
   function hangup() {
@@ -166,6 +186,17 @@
     >
   {/if}
 </div>
+
+{#if status === "ready"}
+  <form class="composer-row" onsubmit={sendTyped}>
+    <input
+      bind:value={typed}
+      placeholder={m.realtime_say()}
+      aria-label={m.realtime_say()}
+    />
+    <button class="button primary" type="submit">{m.send()}</button>
+  </form>
+{/if}
 
 <p class="realtime-status" aria-live="polite">
   {status === "ready"

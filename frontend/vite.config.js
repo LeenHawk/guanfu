@@ -39,7 +39,8 @@ export default defineConfig(() => ({
       ignored: ["**/backend/**"],
     },
     proxy: {
-      "/api": "http://127.0.0.1:3000",
+      // realtime 走 WebSocket:代理默认不转发升级请求,必须显式开 ws。
+      "/api": { target: "http://127.0.0.1:3000", ws: true },
     },
   },
 }));

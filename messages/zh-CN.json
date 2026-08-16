@@ -135,5 +135,6 @@
   "unauthorized": "需要访问令牌",
   "token_prompt": "该服务端要求访问令牌",
   "token_label": "访问令牌",
-  "token_save": "保存"
+  "token_save": "保存",
+  "realtime_say": "打字发言"
 }

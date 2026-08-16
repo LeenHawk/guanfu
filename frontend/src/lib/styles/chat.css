@@ -69,6 +69,17 @@
   flex: 1;
   resize: vertical;
 }
+/* 实时面板的打字行用的是 input,和聊天输入框一样要撑满并带边框。 */
+.composer-row input {
+  flex: 1;
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: inherit;
+  font: inherit;
+}
 .sidebar-list {
   margin: 0 0 20px;
   padding: 0;

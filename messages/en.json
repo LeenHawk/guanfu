@@ -135,5 +135,6 @@
   "unauthorized": "Access token required",
   "token_prompt": "This server requires an access token",
   "token_label": "Access token",
-  "token_save": "Save"
+  "token_save": "Save",
+  "realtime_say": "Type instead"
 }

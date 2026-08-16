@@ -106,12 +106,14 @@ export async function connectRealtime(
       once: true,
     });
   });
+  // 监听器必须先于握手帧注册:服务端可能立刻回 ready 或 error,
+  // 后注册会把这一帧丢掉,界面就会永远停在"连接中"。
+  socket.addEventListener("message", (event) =>
+    onFrame(JSON.parse(event.data) as RealtimeDownstream),
+  );
   // 首帧带渠道与会话配置,服务端据此连上游。
   socket.send(
     JSON.stringify({ token: authToken(), channel_id: channelId, request }),
-  );
-  socket.addEventListener("message", (event) =>
-    onFrame(JSON.parse(event.data) as RealtimeDownstream),
   );
   return {
     send: (event) => socket.send(JSON.stringify(event)),
