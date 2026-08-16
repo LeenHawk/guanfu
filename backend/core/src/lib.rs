@@ -8,6 +8,7 @@
 
 mod app;
 pub mod assets;
+pub mod context;
 mod db;
 pub mod entities;
 pub mod error;
