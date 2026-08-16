@@ -16,6 +16,14 @@ fn api_error(error: CoreError) -> ApiError {
     error.api_error()
 }
 
+fn forget_request(active: &ActiveLlmRequests, request_id: &str) {
+    active
+        .0
+        .lock()
+        .expect("active request lock poisoned")
+        .remove(request_id);
+}
+
 #[tauri::command]
 pub async fn execute_llm(
     state: State<'_, AppState>,
@@ -35,10 +43,18 @@ pub async fn execute_llm(
     let execute = state
         .llm
         .execute(&state.db, input.channel_id, input.request);
-    let output = tokio::select! {
-        result = execute => result.map_err(api_error)?,
-        () = cancellation.cancelled() => {
-            active.0.lock().expect("active request lock poisoned").remove(&request_id);
+    let outcome = tokio::select! {
+        result = execute => Some(result),
+        () = cancellation.cancelled() => None,
+    };
+    let output = match outcome {
+        Some(Ok(output)) => output,
+        Some(Err(error)) => {
+            forget_request(&active, &request_id);
+            return Err(api_error(error));
+        }
+        None => {
+            forget_request(&active, &request_id);
             return Ok(None);
         }
     };
@@ -70,11 +86,7 @@ pub async fn execute_llm(
             },
         )),
     };
-    active
-        .0
-        .lock()
-        .expect("active request lock poisoned")
-        .remove(&request_id);
+    forget_request(&active, &request_id);
     result
 }
 

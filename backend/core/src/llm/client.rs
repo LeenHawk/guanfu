@@ -43,6 +43,8 @@ impl LlmClient {
         });
         let http = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
+            // 流式响应不设整请求超时,靠逐次读的空闲超时兜底。
+            .read_timeout(request_timeout)
             .build()
             .expect("reqwest client construction is infallible with these options");
         Self {
@@ -62,7 +64,13 @@ impl LlmClient {
     ) -> Result<WireResult, CoreError> {
         let url = format!("{}{}", target.base_url.trim_end_matches('/'), request.path);
         let mut builder = self.http.request(request.method, url);
-        builder = builder.timeout(self.request_timeout);
+        // 整请求超时只适用于缓冲响应;对 SSE/二进制流会把长生成中途掐断。
+        if matches!(
+            request.response_mode,
+            ResponseMode::Json | ResponseMode::Binary
+        ) {
+            builder = builder.timeout(self.request_timeout);
+        }
         if !request.query.is_empty() {
             let query = request
                 .query
