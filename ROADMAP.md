@@ -72,7 +72,7 @@
 
 ## 阶段 6：打磨与发布
 
-- [ ] 音频能力：协议层已有 speech / transcription / translation 操作，按路由矩阵接入
+- [ ] 音频与视频能力：speech / transcription / translation 与视频任务（OpenAI 直通、Gemini 经 Veo）core 已就绪，按路由矩阵接入 UI
 - [ ] Axum 侧多用户与部署考量：鉴权、多实例约束复查（跨实例状态、并发写）
 - [ ] 打包发布：`pnpm tauri build` 桌面产物；server 端部署方式
 - [ ] 性能与可观测性复查：span 覆盖关键链路、慢查询、前端 CLS / 首屏

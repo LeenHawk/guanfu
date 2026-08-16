@@ -70,96 +70,109 @@ IR 落点的协议专用字段仍可覆盖；未匹配目标协议的 options �
 - Chat、Gemini 或 Claude 无法表达的 summary 值返回 route incompatible，参与路由
   fallback。
 
-## 2. P1：对应能力开放前修复
+### 1.5 采样参数跨协议有损是显式决策
 
-### 2.1 工具定义、调用和结果不对称
+`SamplingOptions` 在 transform 后按目标协议直写；目标官方协议本身不支持的参数
+会被静默丢弃，不产生 diagnostics，也不触发 route incompatible。这是有意的宽松
+策略，不是缺口。当前落点（WebSocket 同 Responses）：
 
-工具 IR 中存在以下未兑现字段或 variant：
+| 参数 | Responses | Chat Completions | Claude Messages | Gemini |
+| --- | --- | --- | --- | --- |
+| `temperature` / `top_p` | 写入 | 写入 | 写入 | 写入 |
+| `top_k` | 丢弃 | 丢弃 | 写入 | 写入 |
+| `seed` | 丢弃 | 写入 | 丢弃 | 写入 |
+| `stop` | 丢弃 | 写入 | 写入 | 写入 |
+| `frequency_penalty` / `presence_penalty` | 丢弃 | 写入 | 丢弃 | 写入 |
 
-- `WebSearchTool.max_uses` 没有编码。
-- `TextEditorTool.max_characters` 被完全忽略。
-- `McpApproval::PerTool` 被编码成字符串 `per_tool`，但 Responses 要求 typed tool
-  filter 对象；当前 wire 值无效。
-- `mcp_approval_request` 没有输出模型和 decoder，`ToolResultKind::Mcp` 却固定编码成
-  approval response，调用与审批语义混在一起。
-- `ToolCall::WebFetch` 和 `ToolCall::Memory` 没有任何 decoder 构造路径。
-- Memory definition 被降成普通 function，响应只能解码成 Function call，声明专用
-  variant 没有意义。
-- `ToolExecution` 只有部分进度 delta，没有完整 output item 对称解码；相关
-  `OutputKind::ToolExecution` 也不会产生。
-- `ToolChoice::Allowed` 只保存名称并把所有目标编码成 function，无法选择 hosted、
-  custom 等其他 tool kind。
+理由：
 
-默认角色扮演聊天只需要 function tool 时可暂不扩展全部工具，但进入 AgentLoop 前
-必须删除虚假的专用 variant或补齐 typed 语义。
+- 空档来自官方协议自身的能力差异，不是 transform 丢失；严格拒绝会让携带常见
+  sampler 组合的预设（如 SillyTavern 导入件）在大量渠道上直接不可用。
+- 采样参数只影响生成分布，丢弃后请求语义仍成立。与之相对，reasoning 选项影响
+  计费、思维预算和历史回放，无法表达时必须 route incompatible。同一请求里两种
+  策略并存是有意区分，不作统一。
+- 需要提示时由 UI 层依据本表提示"当前路由下无效的参数"，codec 层不报错。
 
-### 2.2 Generation stream 中存在死事件
+## 2. 2026-08-16 收口批次（原 P1/P2）
 
-已经声明但 decoder 不会产生的内容包括：
+以下缺口已全部处理。所需的 gproxy 扩展（web_search/web_fetch 的
+`max_uses` 与 `blocked_domains`、apply_patch 的 `max_characters`、`memory`
+扩展 variant、OpenAI Model 的 `max_input_tokens`/`max_output_tokens`）已随
+gproxy 2.7.0 发布；Realtime 建模同批发布，视频与生图路由随 2.8.0 发布。
 
-- `GenerateDelta::Compaction`
-- `OutputKind::ToolExecution`
-- `ContentKind::ToolInput`
+### 2.1 工具语义
 
-Compaction output item 也不在 `OutputKind` 中，流式收到 compaction item 时会直接报
-unmodeled event。修复时应保持完整响应和流式最终 `OutputFinished.item` 对称；如果
-当前版本不准备支持某个事件，应先从公共 enum 删除，避免调用方误以为可用。
+- web_search `max_uses`/`blocked_domains`、text_editor `max_characters`、memory
+  工具定义经 gproxy Responses 侧扩展映射到 Claude 原生工具；OpenAI 系目标无法
+  表达这些扩展时显式 route incompatible 参与路由回退，不会静默发给真实上游。
+- `McpApproval::PerTool` 补 typed 载荷（always/never 各自的 tool_names），编码为
+  官方 filter 对象；`mcp_approval_request` 建模为输出 item，答复走独立输入项
+  `McpApprovalResponse`；`ToolResultKind::Mcp` 删除（MCP 工具服务端执行，客户端
+  只回批准与否）。
+- 服务端执行的托管调用（web_search / file_search / code_interpreter /
+  image_generation / mcp / mcp_list_tools）完整响应与流式统一解码为
+  `ToolExecution`（状态 + 原始 item + error），`ToolCall` 只保留需要客户端行动的
+  kind。`ToolCall::WebFetch` 与 `ToolCall::Memory` 删除：canonical 线上
+  web_fetch 结果并入 web_search_call item，memory 调用以名为 `memory` 的
+  function call 到达。
+- `ToolChoice::Allowed` 依据请求内工具定义还原类型，编码 typed 条目。
 
-### 2.3 图像编辑 multipart 丢字段
+### 2.2 流事件
 
-`EditImageRequest` 先生成完整 JSON，随后 OpenAI multipart 重建只保留一部分字段。
-以下已声明选项在 multipart 路径丢失：
+- `GenerateDelta::Compaction`、`ContentKind::ToolInput`、`OutputKind::Image`
+  删除——canonical 线上没有来源（Claude compaction 流是文本 delta，工具输入走
+  专用 delta 事件，图像走 image_generation_call）。
+- `OutputKind` 新增 `Compaction` 与 `McpApprovalRequest`，两类 item 在流式
+  added/done 全程可解码不再报 unmodeled；`OutputKind::ToolExecution` 随托管调用
+  真实产生。
 
-- background
-- compression
-- moderation
-- partial_images
-- stream flag
+### 2.3 媒体 codec
 
-因此 image edit stream 虽然选择 SSE response mode，上游请求却没有 `stream=true`。
-在图编辑 UI 开放前补齐；不支持的选项应显式 route incompatible，不能无声忽略。
+- 图像编辑 multipart 补齐 background / output_compression / moderation /
+  partial_images 与 stream 标志；`*.completed` 单图事件的包装修正（顶层
+  `b64_json` 不再按 `data` 数组硬解）。
+- 转录 multipart 编码 diarization（`known_speaker_names[]` 与
+  `known_speaker_references[]` 成对）、`chunking_strategy`；`response_format`
+  按请求内容选择 diarized_json / verbose_json；`Transcription.usage` 解码
+  Duration / Tokens 两型。`KnownSpeaker.reference` 收紧为必填（wire 上成对
+  数组，无 reference 的 speaker 无法表达）。
+- `ImageEvent::Progress` 由 `*.partial_image` 帧产生；`ImageEvent::Started/
+  Failed`、`SpeechEvent::Failed`、`TranscriptionEvent::Started/Failed` 删除，
+  操作失败统一由外层 `SemanticStreamMessage::Error` 承接。
 
-### 2.4 转录 diarization 和 usage 是死能力
+### 2.4 模型列表
 
-`TranscriptionRequest` 已声明 `DiarizationConfig`、known speakers 和 chunking，但
-multipart encoder 完全不读取这些字段。时间戳请求也没有配套选择 verbose/diarized
-response format，可能无法得到 IR 声明的 words/segments。
+- `Model.capabilities` 删除：没有可靠的跨 provider 能力矩阵，路由表是能力的
+  事实来源。
+- token 上限经 canonical OpenAI model 的 gproxy 扩展字段
+  （`max_input_tokens` / `max_output_tokens`）从 Claude / Gemini 渠道透出，
+  `context_limit` / `output_limit` 不再恒空。
 
-响应 decoder 永远把 `Transcription.usage` 写成 `None`，`AudioUsage` 两个 variant
-没有构造路径。音频能力接入 UI 前需要完成编码、响应格式选择和 usage 解码；否则
-删除尚未支持的字段。
+## 3. 剩余
 
-## 3. P2：清理误导性表面能力
+无。视频与生图的跨供应商路由已于 2026-08-16 补齐(gproxy 2.8.0):
 
-### 3.1 模型能力信息永远为空
+- **生图**:Gemini 渠道有两条路由,按模型选。`gemini-*-image` 系走批准的
+  跨操作路由(`create_image/edit_image (open_ai) → transform_to
+  generate_content (gemini_generate_content)`);`imagen-*` 系走原生
+  `:predict` 端点(gproxy 2.8.1,规则 dest_kind 用 provider kind `gemini`,
+  同操作转换)。两条链路 guanfu 均有 fixture 验证。
+- **视频**:语义 IR 为异步任务形态(Create/Retrieve/List/Delete/
+  DownloadContent,`VideoJob.content_ref` 承接下载标识)。OpenAI 渠道直通
+  /v1/videos 家族;Gemini 渠道经 gproxy 转为 Veo predictLongRunning 与长时
+  操作轮询,完成后从 `gproxy_video_uri` 提取文件 id 供下载。Remix/角色/
+  编辑/续写等 OpenAI 专属操作暂不进 guanfu IR,需要时再加。
 
-`Model.capabilities`、context limit 和 output limit 已经公开，但当前 model decoder
-固定把 capabilities 写成 `None`。limit 也只有上游恰好返回 canonical 字段时才有
-值。若没有可靠 provider 映射，应把它们明确标成 optional discovery，而不是据此
-决定 route 能力；route 的事实来源仍是 channel routing table。
+Realtime 已于 2026-08-16 落地(gproxy 2.7.0 建模 GA 协议;guanfu 侧
+`CreateRealtimeCall` 走 multipart SDP 交换,`ConnectRealtime` 走 WebSocket
+双工,语义事件见 `ir/realtime.rs`)。设计上的两个显式取舍:
 
-### 3.2 媒体流式生命周期 enum 与实际 decoder 不一致
+- 未建模的 realtime 服务端事件(item 生命周期细节、限流通报、未来新增
+  事件)被**有意跳过**而不是报错——长连接会话不因协议演进中断。这与 HTTP
+  流式解码"未知即 unmodeled 错误"的策略不同,是 per-transport 的显式决策。
+- Realtime 双工不经过通用 invoke / `/api/llm` 通路;壳层的专用通道
+  (Tauri command + Channel、Axum WebSocket 端点)在对应 UI 阶段接入,
+  接入前两壳对 Realtime 输出显式报错。
 
-`ImageEvent::Started/Progress/Failed`、`SpeechEvent::Failed`、
-`TranscriptionEvent::Started/Failed` 没有 codec 构造路径。部分失败实际通过外层
-`SemanticStreamMessage::Error` 传递。
-
-应选择一个统一规则：操作失败都走外层结构化 stream error，或各 operation event
-都产生 Failed；不要同时公开两套但只实现一套。当前没有真实 wire 来源的
-Started/Progress 应暂时删除。
-
-### 3.3 Realtime 是明确未实现，不是静默缺口
-
-Realtime request/response 类型已经存在，但 codec 会明确返回
-`UnsupportedCapability::Realtime`。这部分可以继续后置，但在实现前不能在产品
-能力矩阵中标记为可用。
-
-## 4. 修复顺序
-
-1. 确定 message content 的版本化 schema，进入会话持久化。
-2. AgentLoop 前收口工具不对称。
-3. 图像/音频 UI 接入前分别收口 media codec。
-4. 删除没有当前实现、也没有近期使用方的公共 enum variant。
-
-验证保持克制：每个缺口只保留一个完整响应或流式 fixture，证明 IR 字段确实能从
-wire 进入、持久化并在需要时回到 wire；不建设全量 provider 兼容矩阵测试。
+验证保持克制：每个已收口语义只保留一个完整响应或流式 fixture，证明 IR 字段
+确实能从 wire 进入并在需要时回到 wire；不建设全量 provider 兼容矩阵测试。
