@@ -1,5 +1,6 @@
 mod commands;
 
+use guanfu_core::llm::ir::realtime::RealtimeClientEvent;
 use guanfu_core::{AppConfig, AppState, LlmConfig};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -9,6 +10,12 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Default)]
 struct ActiveLlmRequests(Mutex<HashMap<String, CancellationToken>>);
+
+/// 进行中的 realtime 会话:客户端事件经此推给上游。
+#[derive(Default)]
+struct ActiveRealtimeSessions(
+    Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<RealtimeClientEvent>>>,
+);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,6 +37,7 @@ pub fn run() {
             }))?;
             app.manage(state);
             app.manage(ActiveLlmRequests::default());
+            app.manage(ActiveRealtimeSessions::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -53,6 +61,17 @@ pub fn run() {
             commands::load_chat_history,
             commands::fork_chat_history,
             commands::run_chat,
+            commands::media_data_url,
+            commands::generate_image,
+            commands::edit_image,
+            commands::create_speech,
+            commands::transcribe,
+            commands::create_video,
+            commands::poll_video,
+            commands::download_video,
+            commands::connect_realtime,
+            commands::send_realtime,
+            commands::close_realtime,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

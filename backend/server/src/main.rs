@@ -1,3 +1,4 @@
+mod realtime;
 mod routes;
 
 use std::net::SocketAddr;

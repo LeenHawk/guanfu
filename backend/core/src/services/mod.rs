@@ -3,6 +3,8 @@ pub mod channels;
 pub mod chat;
 pub mod exchange;
 pub mod llm;
+pub mod media;
+pub mod realtime;
 pub mod routing;
 pub mod runner;
 pub mod runs;

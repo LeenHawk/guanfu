@@ -8,11 +8,15 @@ use guanfu_core::assets::chat_history::SessionBindings;
 use guanfu_core::entities::asset::AssetKind;
 use guanfu_core::error::ApiError;
 use guanfu_core::llm::codec::OperationEvent;
+use guanfu_core::llm::ir::audio::{SpeechRequest, TranscriptionRequest};
+use guanfu_core::llm::ir::images::{EditImageRequest, GenerateImageRequest};
+use guanfu_core::llm::ir::video::CreateVideoRequest;
 use guanfu_core::services::assets::AssetService;
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
 use guanfu_core::services::chat::ChatService;
 use guanfu_core::services::exchange::ExchangeService;
 use guanfu_core::services::llm::{SemanticLlmOutput, SemanticLlmRequest, SemanticStreamMessage};
+use guanfu_core::services::media::{MediaInput, MediaService, VideoJobInput};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingService};
 use guanfu_core::services::runner::{ChatRunRequest, RunnerService};
 use guanfu_core::{AppState, CoreError};
@@ -50,6 +54,18 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(fork_history),
         )
         .route("/api/chat/runs", axum::routing::post(run_chat))
+        .route("/api/realtime", get(crate::realtime::handler))
+        .route("/api/media/{id}/content", get(media_content))
+        .route("/api/media/images", axum::routing::post(generate_image))
+        .route("/api/media/images/edit", axum::routing::post(edit_image))
+        .route("/api/media/speech", axum::routing::post(create_speech))
+        .route("/api/media/transcriptions", axum::routing::post(transcribe))
+        .route("/api/media/videos", axum::routing::post(create_video))
+        .route("/api/media/videos/poll", axum::routing::post(poll_video))
+        .route(
+            "/api/media/videos/download",
+            axum::routing::post(download_video),
+        )
         .with_state(state)
 }
 
@@ -156,6 +172,110 @@ async fn load_history(
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(ChatService::load_history(&state.db, id).await?))
+}
+
+/// 直接吐字节:图片与音频要能被 <img>/<audio> 直接引用。
+async fn media_content(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<Response, HttpError> {
+    let (media, bytes) = AssetService::read_media(&state.db, state.assets.as_ref(), id).await?;
+    Ok(([(axum::http::header::CONTENT_TYPE, media.mime_type)], bytes).into_response())
+}
+
+async fn generate_image(
+    State(state): State<AppState>,
+    Json(input): Json<MediaInput<GenerateImageRequest>>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::generate_image(
+            &state.db,
+            &state.llm,
+            &state.assets,
+            input.channel_id,
+            &input.name,
+            input.request,
+        )
+        .await?,
+    ))
+}
+
+async fn edit_image(
+    State(state): State<AppState>,
+    Json(input): Json<MediaInput<EditImageRequest>>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::edit_image(
+            &state.db,
+            &state.llm,
+            &state.assets,
+            input.channel_id,
+            &input.name,
+            input.request,
+        )
+        .await?,
+    ))
+}
+
+async fn create_speech(
+    State(state): State<AppState>,
+    Json(input): Json<MediaInput<SpeechRequest>>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::speech(
+            &state.db,
+            &state.llm,
+            &state.assets,
+            input.channel_id,
+            &input.name,
+            input.request,
+        )
+        .await?,
+    ))
+}
+
+async fn transcribe(
+    State(state): State<AppState>,
+    Json(input): Json<MediaInput<TranscriptionRequest>>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::transcribe(&state.db, &state.llm, input.channel_id, input.request).await?,
+    ))
+}
+
+async fn create_video(
+    State(state): State<AppState>,
+    Json(input): Json<MediaInput<CreateVideoRequest>>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::create_video(&state.db, &state.llm, input.channel_id, input.request).await?,
+    ))
+}
+
+async fn poll_video(
+    State(state): State<AppState>,
+    Json(input): Json<VideoJobInput>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::poll_video(&state.db, &state.llm, input.channel_id, input.id).await?,
+    ))
+}
+
+async fn download_video(
+    State(state): State<AppState>,
+    Json(input): Json<VideoJobInput>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        MediaService::download_video(
+            &state.db,
+            &state.llm,
+            &state.assets,
+            input.channel_id,
+            &input.name,
+            input.id,
+        )
+        .await?,
+    ))
 }
 
 #[derive(serde::Deserialize)]

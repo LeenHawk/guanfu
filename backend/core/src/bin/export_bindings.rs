@@ -20,6 +20,8 @@ use guanfu_core::services::routing::{
     OperationKeyDto, PutRoutingRule, RoutingImplementation, RoutingRuleDto,
 };
 use guanfu_core::services::runner::{ChatRunRequest, PipelineEvent};
+use guanfu_core::services::media::{MediaResult, VideoJobInput};
+use guanfu_core::services::realtime::{RealtimeDownstream, RealtimeHandshake};
 use guanfu_core::services::runs::{ResolvedSlot, SlotBinding};
 use ts_rs::{Config, TS};
 
@@ -63,5 +65,9 @@ fn main() -> Result<(), ts_rs::ExportError> {
     ChatRunRequest::export_all(&config)?;
     PipelineEvent::export_all(&config)?;
     ImportedCharacter::export_all(&config)?;
+    MediaResult::export_all(&config)?;
+    VideoJobInput::export_all(&config)?;
+    RealtimeHandshake::export_all(&config)?;
+    RealtimeDownstream::export_all(&config)?;
     Ok(())
 }

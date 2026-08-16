@@ -204,6 +204,61 @@ impl AssetService {
         asset::Entity::delete_by_id(id).exec(db).await?;
         Ok(())
     }
+
+    /// 保存二进制内容为 Media Asset。
+    ///
+    /// 先写对象再提交元数据:外部存储写入不进数据库事务,失败留下的孤儿
+    /// 对象由显式维护操作清理(计划 §2.2)。
+    pub async fn create_media(
+        db: &impl ConnectionTrait,
+        store: &dyn crate::assets::AssetStore,
+        name: &str,
+        mime_type: &str,
+        filename: Option<String>,
+        bytes: &[u8],
+    ) -> Result<AssetHeadDto, CoreError> {
+        let hash = crate::assets::chunk_hash(bytes);
+        store.put(&hash, bytes)?;
+        let size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
+        chunk::Entity::insert(chunk::ActiveModel {
+            hash: Set(hash.0.clone()),
+            location: Set(chunk::ChunkLocation::Store),
+            bytes: Set(None),
+            size: Set(size),
+        })
+        .on_conflict(
+            OnConflict::column(chunk::Column::Hash)
+                .do_nothing()
+                .to_owned(),
+        )
+        .exec_without_returning(db)
+        .await?;
+        Self::create(
+            db,
+            name,
+            None,
+            &crate::assets::MediaDefinition::V1(crate::assets::media::MediaV1 {
+                hash,
+                mime_type: mime_type.to_owned(),
+                size: bytes.len() as u64,
+                filename,
+                extra: Default::default(),
+            }),
+        )
+        .await
+    }
+
+    /// 读取 Media Asset 的元数据与字节。
+    pub async fn read_media(
+        db: &impl ConnectionTrait,
+        store: &dyn crate::assets::AssetStore,
+        id: i32,
+    ) -> Result<(crate::assets::media::MediaV1, Vec<u8>), CoreError> {
+        let loaded = Self::load::<crate::assets::MediaDefinition>(db, id).await?;
+        let crate::assets::MediaDefinition::V1(media) = loaded.definition;
+        let bytes = store.get(&media.hash)?;
+        Ok((media, bytes))
+    }
 }
 
 /// 共享的 CAS 提交路径:写 chunk → 插入不可变修订 → 移动头指针。

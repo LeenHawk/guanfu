@@ -1,6 +1,12 @@
 use guanfu_core::assets::chat_history::SessionBindings;
 use guanfu_core::entities::asset::AssetKind;
 use guanfu_core::error::ApiError;
+use guanfu_core::llm::ir::audio::{SpeechRequest, Transcription, TranscriptionRequest};
+use guanfu_core::llm::ir::images::{EditImageRequest, GenerateImageRequest};
+use guanfu_core::llm::ir::platform::{ConnectRealtimeRequest, PlatformRequest};
+use guanfu_core::llm::ir::realtime::RealtimeClientEvent;
+use guanfu_core::llm::ir::video::{CreateVideoRequest, VideoJob};
+use guanfu_core::llm::ir::OperationRequest;
 use guanfu_core::llm::ir::OperationResponse;
 use guanfu_core::services::assets::{AssetHeadDto, AssetService};
 use guanfu_core::services::channels::{
@@ -9,13 +15,15 @@ use guanfu_core::services::channels::{
 use guanfu_core::services::chat::{ChatBootstrap, ChatHistoryView, ChatService};
 use guanfu_core::services::exchange::{ExchangeService, ImportedCharacter};
 use guanfu_core::services::llm::{SemanticLlmOutput, SemanticLlmRequest, SemanticStreamMessage};
+use guanfu_core::services::media::{MediaInput, MediaResult, MediaService, VideoJobInput};
+use guanfu_core::services::realtime::RealtimeDownstream;
 use guanfu_core::services::routing::{PutRoutingRule, RoutingRuleDto, RoutingService};
 use guanfu_core::services::runner::{ChatRunRequest, PipelineEvent, RunnerService};
 use guanfu_core::{AppState, CoreError};
 use tauri::{ipc::Channel, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::ActiveLlmRequests;
+use crate::{ActiveLlmRequests, ActiveRealtimeSessions};
 
 fn api_error(error: CoreError) -> ApiError {
     tracing::error!(error = ?error, "core operation failed");
@@ -299,4 +307,220 @@ pub async fn run_chat(
     };
     forget_request(&active, &request_id);
     result
+}
+
+/// 媒体内容以 data URL 交给 webview:桌面端没有 HTTP 端点可引用。
+#[tauri::command]
+pub async fn media_data_url(state: State<'_, AppState>, id: i32) -> Result<String, ApiError> {
+    use base64::Engine;
+
+    let (media, bytes) = AssetService::read_media(&state.db, state.assets.as_ref(), id)
+        .await
+        .map_err(api_error)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{};base64,{encoded}", media.mime_type))
+}
+
+#[tauri::command]
+pub async fn generate_image(
+    state: State<'_, AppState>,
+    input: MediaInput<GenerateImageRequest>,
+) -> Result<MediaResult, ApiError> {
+    MediaService::generate_image(
+        &state.db,
+        &state.llm,
+        &state.assets,
+        input.channel_id,
+        &input.name,
+        input.request,
+    )
+    .await
+    .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn edit_image(
+    state: State<'_, AppState>,
+    input: MediaInput<EditImageRequest>,
+) -> Result<MediaResult, ApiError> {
+    MediaService::edit_image(
+        &state.db,
+        &state.llm,
+        &state.assets,
+        input.channel_id,
+        &input.name,
+        input.request,
+    )
+    .await
+    .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn create_speech(
+    state: State<'_, AppState>,
+    input: MediaInput<SpeechRequest>,
+) -> Result<AssetHeadDto, ApiError> {
+    MediaService::speech(
+        &state.db,
+        &state.llm,
+        &state.assets,
+        input.channel_id,
+        &input.name,
+        input.request,
+    )
+    .await
+    .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn transcribe(
+    state: State<'_, AppState>,
+    input: MediaInput<TranscriptionRequest>,
+) -> Result<Transcription, ApiError> {
+    MediaService::transcribe(&state.db, &state.llm, input.channel_id, input.request)
+        .await
+        .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn create_video(
+    state: State<'_, AppState>,
+    input: MediaInput<CreateVideoRequest>,
+) -> Result<VideoJob, ApiError> {
+    MediaService::create_video(&state.db, &state.llm, input.channel_id, input.request)
+        .await
+        .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn poll_video(
+    state: State<'_, AppState>,
+    input: VideoJobInput,
+) -> Result<VideoJob, ApiError> {
+    MediaService::poll_video(&state.db, &state.llm, input.channel_id, input.id)
+        .await
+        .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn download_video(
+    state: State<'_, AppState>,
+    input: VideoJobInput,
+) -> Result<AssetHeadDto, ApiError> {
+    MediaService::download_video(
+        &state.db,
+        &state.llm,
+        &state.assets,
+        input.channel_id,
+        &input.name,
+        input.id,
+    )
+    .await
+    .map_err(api_error)
+}
+
+/// 建立 realtime 双工会话:下行走 Channel,上行走 `send_realtime`。
+///
+/// 命令在会话结束前不返回,因此壳层不需要额外的保活。
+#[tauri::command]
+pub async fn connect_realtime(
+    state: State<'_, AppState>,
+    sessions: State<'_, ActiveRealtimeSessions>,
+    session_id: String,
+    channel_id: i32,
+    input: ConnectRealtimeRequest,
+    on_event: Channel<RealtimeDownstream>,
+) -> Result<(), ApiError> {
+    let output = state
+        .llm
+        .execute(
+            &state.db,
+            channel_id,
+            OperationRequest::Platform(PlatformRequest::ConnectRealtime(input)),
+        )
+        .await
+        .map_err(api_error)?;
+    let SemanticLlmOutput::Realtime(connection) = output else {
+        return Err(api_error(CoreError::UnsupportedRouteImplementation {
+            implementation: "non-realtime route on the realtime command",
+        }));
+    };
+
+    let (uplink, mut uplink_rx) = tokio::sync::mpsc::unbounded_channel::<RealtimeClientEvent>();
+    sessions
+        .0
+        .lock()
+        .expect("realtime session lock poisoned")
+        .insert(session_id.clone(), uplink);
+
+    let mut sender = connection.sender;
+    let mut events = connection.events;
+    let _ = on_event.send(RealtimeDownstream::Ready);
+
+    loop {
+        tokio::select! {
+            outgoing = uplink_rx.recv() => match outgoing {
+                Some(event) => {
+                    if sender.send(&event).await.is_err() {
+                        break;
+                    }
+                }
+                None => break,
+            },
+            incoming = events.next() => match incoming {
+                Some(Ok(event)) => {
+                    if on_event
+                        .send(RealtimeDownstream::Event { event: Box::new(event) })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Some(Err(error)) => {
+                    let _ = on_event.send(RealtimeDownstream::Error { error: error.api_error() });
+                }
+                None => break,
+            },
+        }
+    }
+
+    let _ = sender.close().await;
+    sessions
+        .0
+        .lock()
+        .expect("realtime session lock poisoned")
+        .remove(&session_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn send_realtime(
+    sessions: State<'_, ActiveRealtimeSessions>,
+    session_id: String,
+    event: RealtimeClientEvent,
+) -> Result<(), ApiError> {
+    let sender = sessions
+        .0
+        .lock()
+        .expect("realtime session lock poisoned")
+        .get(&session_id)
+        .cloned();
+    match sender {
+        Some(sender) => sender
+            .send(event)
+            .map_err(|_| api_error(CoreError::WebSocket("realtime session closed".to_owned()))),
+        None => Err(api_error(CoreError::WebSocket(
+            "no such realtime session".to_owned(),
+        ))),
+    }
+}
+
+#[tauri::command]
+pub fn close_realtime(sessions: State<'_, ActiveRealtimeSessions>, session_id: String) {
+    // 丢掉发送端即让 connect_realtime 的循环收口。
+    sessions
+        .0
+        .lock()
+        .expect("realtime session lock poisoned")
+        .remove(&session_id);
 }
