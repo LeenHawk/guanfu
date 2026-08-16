@@ -301,7 +301,13 @@ async fn run_chat(
     Json(input): Json<ChatRunRequest>,
 ) -> Result<Response, HttpError> {
     use futures_util::StreamExt;
-    let events = RunnerService::run_chat(state.db.clone(), state.llm.clone(), input).await?;
+    let events = RunnerService::run_chat(
+        state.db.clone(),
+        state.llm.clone(),
+        state.assets.clone(),
+        input,
+    )
+    .await?;
     let stream = events.map(|event| {
         Ok::<_, std::convert::Infallible>(
             Event::default()

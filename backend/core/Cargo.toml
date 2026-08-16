@@ -39,7 +39,7 @@ sha2 = "0.10"
 hex = "0.4"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
-tokio = { version = "1", default-features = false, features = ["time"] }
+tokio = { version = "1", default-features = false, features = ["time", "sync", "macros"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

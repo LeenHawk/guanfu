@@ -3,28 +3,31 @@
 //! 逐节点事件不持久化;流式 delta 只是 UI 的临时进度,当轮结束时把用户
 //! 消息与助手输出一次性追加到 ChatHistory 并记录 run(计划 §5 / §7 / §9)。
 
+mod graph;
 mod snapshot;
 mod template;
 
-use futures_util::stream::{Stream, StreamExt};
+use futures_util::stream::Stream;
 use sea_orm::{ConnectionTrait, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 
 use crate::assets::chat_history::{ChatMessage, MESSAGES};
 use crate::assets::preset::GenerationTrigger;
-use crate::context::{build_context, DraftMessage, GenerationDraft, TurnRole};
+use crate::assets::PipelineDefinition;
+use crate::context::{DraftMessage, GenerationDraft, TurnRole};
 use crate::error::ApiError;
 use crate::llm::codec::OperationEvent;
 use crate::llm::ir::generation::{
     FinishReason, GenerateEvent, GenerateMode, GenerateRequest, GenerationLimits, InputContent,
     InputItem, Message, MessageRole, OutputConstraint, OutputItem, OutputModality, ToolChoice,
 };
-use crate::llm::ir::{ModelId, OperationRequest, Usage};
+use crate::llm::ir::{ModelId, Usage};
 use crate::services::assets::AssetService;
-use crate::services::llm::{LlmService, SemanticLlmOutput};
+use crate::services::llm::LlmService;
 use crate::services::runs::{ResolvedSlot, RunService, SlotBinding};
 use crate::CoreError;
 
+pub use graph::{GraphContext, PortValue};
 pub use snapshot::load_snapshot;
 pub use template::{chat_pipeline, ensure_chat_pipeline};
 
@@ -74,10 +77,12 @@ impl RunnerService {
     pub async fn run_chat(
         db: DatabaseConnection,
         llm: std::sync::Arc<LlmService>,
+        store: std::sync::Arc<dyn crate::assets::AssetStore>,
         request: ChatRunRequest,
     ) -> Result<impl Stream<Item = PipelineEvent>, CoreError> {
-        let pipeline = template::load_pipeline(&db, request.pipeline_asset_id).await?;
-        let inputs = RunService::resolve_slots(&db, &pipeline, &request.bindings).await?;
+        let definition = template::load_pipeline(&db, request.pipeline_asset_id).await?;
+        let inputs = RunService::resolve_slots(&db, &definition, &request.bindings).await?;
+        let PipelineDefinition::V1(pipeline) = definition;
         let history_slot = inputs
             .iter()
             .find(|slot| slot.slot == HISTORY_SLOT)
@@ -88,103 +93,87 @@ impl RunnerService {
             })?;
         let run = RunService::start(&db, request.pipeline_asset_id, &inputs).await?;
         let snapshot = snapshot::load_snapshot(&db, &inputs, &request, run.id).await?;
-        let draft = build_context(&snapshot);
+
+        let (progress, mut incoming) = tokio::sync::mpsc::unbounded_channel();
+        let context = graph::GraphContext {
+            db,
+            llm,
+            store,
+            snapshot,
+            request,
+            run_id: run.id,
+            progress,
+        };
 
         Ok(async_stream::stream! {
             yield PipelineEvent::Started { run_id: run.id };
-            match execute(&db, &llm, &request, &draft, run.id, &history_slot).await {
-                Ok(events) => {
-                    let mut events = std::pin::pin!(events);
-                    while let Some(event) = events.next().await {
-                        yield event;
+            // 图执行与事件转发在同一个任务里交替推进,壳层无需额外 runtime。
+            let mut work = std::pin::pin!(run_graph(&context, &pipeline, &history_slot));
+            let terminal = loop {
+                tokio::select! {
+                    event = incoming.recv() => {
+                        if let Some(event) = event {
+                            yield event;
+                        }
                     }
+                    outcome = &mut work => break outcome,
                 }
+            };
+            // 图已结束,把还排在通道里的进度事件放完再收口。
+            while let Ok(event) = incoming.try_recv() {
+                yield event;
+            }
+            match terminal {
+                Ok(history) => yield PipelineEvent::Committed { run_id: run.id, history },
                 Err(error) => {
                     let api_error = error.api_error();
-                    let _ = RunService::fail(&db, run.id, &api_error).await;
-                    yield PipelineEvent::Failed {
-                        run_id: Some(run.id),
-                        error: api_error,
-                    };
+                    let _ = RunService::fail(&context.db, run.id, &api_error).await;
+                    yield PipelineEvent::Failed { run_id: Some(run.id), error: api_error };
                 }
             }
         })
     }
 }
 
-async fn execute(
-    db: &DatabaseConnection,
-    llm: &LlmService,
-    request: &ChatRunRequest,
-    draft: &GenerationDraft,
-    run_id: i32,
+/// 跑完整张图,并把终端生成结果作为当轮追加提交。
+async fn run_graph(
+    context: &graph::GraphContext,
+    pipeline: &crate::assets::pipeline::PipelineV1,
     history_slot: &ResolvedSlot,
-) -> Result<impl Stream<Item = PipelineEvent>, CoreError> {
-    let generate = to_generate_request(draft, &request.model);
-    let output = llm
-        .execute(db, request.channel_id, OperationRequest::Generate(generate))
-        .await?;
-
-    let db = db.clone();
-    let history_slot = history_slot.clone();
-    let user_message = request.user_message.clone();
-    let model = request.model.clone();
-
-    Ok(async_stream::stream! {
-        let mut turn = AssistantTurn::default();
-        match output {
-            SemanticLlmOutput::Stream(mut stream) => {
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(event) => {
-                            turn.observe(&event);
-                            yield PipelineEvent::Progress { event };
-                        }
-                        Err(error) => {
-                            let api_error = error.api_error();
-                            let _ = RunService::fail(&db, run_id, &api_error).await;
-                            yield PipelineEvent::Failed { run_id: Some(run_id), error: api_error };
-                            return;
-                        }
-                    }
-                }
-            }
-            SemanticLlmOutput::Complete(response) => {
-                if let crate::llm::ir::OperationResponse::Generate(response) = response {
-                    turn.output = response.output;
-                    turn.finish = response.finish;
-                    turn.usage = response.usage;
-                }
-            }
-            SemanticLlmOutput::Realtime(_) => {
-                let error = CoreError::UnsupportedRouteImplementation {
-                    implementation: "realtime inside a chat run",
-                }
-                .api_error();
-                let _ = RunService::fail(&db, run_id, &error).await;
-                yield PipelineEvent::Failed { run_id: Some(run_id), error };
-                return;
-            }
-        }
-
-        match commit_turn(&db, run_id, &history_slot, user_message, model, turn).await {
-            Ok(history) => yield PipelineEvent::Committed { run_id, history },
-            Err(error) => {
-                let api_error = error.api_error();
-                let _ = RunService::fail(&db, run_id, &api_error).await;
-                yield PipelineEvent::Failed { run_id: Some(run_id), error: api_error };
-            }
-        }
-    })
+) -> Result<ResolvedSlot, CoreError> {
+    let values = graph::execute(context, pipeline).await?;
+    // 历史的输出声明指向哪个端口,就取哪个端口的生成结果。
+    let turn = pipeline
+        .outputs
+        .iter()
+        .find(|output| output.slot == HISTORY_SLOT)
+        .and_then(|output| values.get(&output.from).cloned())
+        .and_then(|value| match value {
+            graph::PortValue::GenerationResult(turn) => Some(*turn),
+            _ => None,
+        })
+        .ok_or_else(|| CoreError::InvalidPipeline {
+            reason: "chat pipeline produced no generation result for the history slot".to_owned(),
+        })?;
+    commit_turn(
+        &context.db,
+        context.run_id,
+        history_slot,
+        context.request.user_message.clone(),
+        context.request.model.clone(),
+        turn,
+    )
+    .await
 }
 
 /// 从流式事件累积当轮结果;`OutputFinished` 已携带完整 item,
 /// 不需要自行拼接 delta。
-struct AssistantTurn {
-    output: Vec<OutputItem>,
+#[derive(Clone, Debug)]
+pub struct AssistantTurn {
+    pub output: Vec<OutputItem>,
     /// 流未给出结束原因时视作被截断,而不是假装正常收尾。
-    finish: FinishReason,
-    usage: Option<Usage>,
+    pub finish: FinishReason,
+    pub usage: Option<Usage>,
 }
 
 impl Default for AssistantTurn {
@@ -198,7 +187,7 @@ impl Default for AssistantTurn {
 }
 
 impl AssistantTurn {
-    fn observe(&mut self, event: &OperationEvent) {
+    pub(crate) fn observe(&mut self, event: &OperationEvent) {
         let OperationEvent::Generate(event) = event else {
             return;
         };
@@ -257,7 +246,11 @@ async fn commit_turn(
     Ok(committed)
 }
 
-fn to_generate_request(draft: &GenerationDraft, model: &ModelId) -> GenerateRequest {
+pub(crate) fn to_generate_request(
+    draft: &GenerationDraft,
+    model: &ModelId,
+    stream: bool,
+) -> GenerateRequest {
     GenerateRequest {
         model: model.clone(),
         input: draft.messages.iter().map(to_input_item).collect(),
@@ -273,7 +266,11 @@ fn to_generate_request(draft: &GenerationDraft, model: &ModelId) -> GenerateRequ
             max_tool_calls: None,
         },
         modalities: vec![OutputModality::Text],
-        mode: GenerateMode::Stream,
+        mode: if stream {
+            GenerateMode::Stream
+        } else {
+            GenerateMode::Complete
+        },
     }
 }
 

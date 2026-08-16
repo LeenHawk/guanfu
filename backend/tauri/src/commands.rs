@@ -287,7 +287,13 @@ pub async fn run_chat(
         .lock()
         .expect("active request lock poisoned")
         .insert(request_id.clone(), cancellation.clone());
-    let started = RunnerService::run_chat(state.db.clone(), state.llm.clone(), input).await;
+    let started = RunnerService::run_chat(
+        state.db.clone(),
+        state.llm.clone(),
+        state.assets.clone(),
+        input,
+    )
+    .await;
     let result = match started {
         Ok(events) => {
             let mut events = std::pin::pin!(events);

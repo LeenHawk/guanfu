@@ -63,8 +63,10 @@ pub struct Node {
     pub kind: NodeKind,
 }
 
-/// V1 节点:一次模型交互或一次纯变换;提示词片段不作为节点。
-/// 图泛化阶段追加 MediaGenerate / AgentLoop / Parallel / Map,schema 不变。
+/// 节点:一次模型交互、一次纯变换,或一个结构节点。
+///
+/// 并行分支不需要专门的节点种类——图里没有依赖关系的节点本来就并发执行。
+/// AgentLoop 要等 Asset 操作挂成工具(计划 §5.3)才有意义,先不建模。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeKind {
@@ -73,7 +75,7 @@ pub enum NodeKind {
         /// 参与组装的输入槽位名。
         slots: Vec<String>,
     },
-    /// 终端节点:流式直通到 UI,累积 GenerationResult。
+    /// 流式直通到 UI,累积 GenerationResult。
     Generate {
         /// 模型与渠道由 run 参数提供,不固定在可分享 pipeline 里。
         model_param: String,
@@ -82,6 +84,27 @@ pub enum NodeKind {
     },
     /// 正则变换。
     TextTransform { regex_slots: Vec<String> },
+    /// 按提示词生成媒体并落成 Media Asset,输出 AssetRef。
+    MediaGenerate {
+        model_param: String,
+        channel_param: String,
+        media: MediaKind,
+    },
+    /// 对一个 many 槽位逐项套用子节点,输出 Json 数组。
+    Map {
+        /// 被遍历的输入槽位名。
+        slot: String,
+        /// 对每一项执行的节点 id。
+        node: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaKind {
+    Image,
+    Speech,
+    Video,
 }
 
 /// 端口值类型的有限集。
@@ -125,6 +148,8 @@ impl NodeKind {
         match (self, port) {
             (Self::Generate { .. }, "prompt") => Some(PortType::PromptBundle),
             (Self::TextTransform { .. }, "input") => Some(PortType::GenerationResult),
+            (Self::MediaGenerate { .. }, "prompt") => Some(PortType::Text),
+            (Self::Map { .. }, "input") => Some(PortType::Json),
             _ => None,
         }
     }
@@ -134,6 +159,8 @@ impl NodeKind {
             (Self::ContextBuild { .. }, "prompt") => Some(PortType::PromptBundle),
             (Self::Generate { .. }, "result") => Some(PortType::GenerationResult),
             (Self::TextTransform { .. }, "output") => Some(PortType::GenerationResult),
+            (Self::MediaGenerate { .. }, "asset") => Some(PortType::AssetRef),
+            (Self::Map { .. }, "output") => Some(PortType::Json),
             _ => None,
         }
     }
@@ -167,7 +194,46 @@ impl PipelineV1 {
             }
             self.port(&output.from, PortSide::Output)?;
         }
+        self.topological_order()?;
         Ok(())
+    }
+
+    /// 拓扑序;有环即报错。无依赖关系的节点在同一层,由 runner 并发执行。
+    pub fn topological_order(&self) -> Result<Vec<Vec<String>>, CoreError> {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let mut blocked_by: BTreeMap<&str, BTreeSet<&str>> = self
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), BTreeSet::new()))
+            .collect();
+        for edge in &self.edges {
+            let (from, _) = split_reference(&edge.from);
+            let (to, _) = split_reference(&edge.to);
+            if let Some(dependencies) = blocked_by.get_mut(to) {
+                dependencies.insert(from);
+            }
+        }
+
+        let mut waves = Vec::new();
+        while !blocked_by.is_empty() {
+            let ready: Vec<String> = blocked_by
+                .iter()
+                .filter(|(_, dependencies)| dependencies.is_empty())
+                .map(|(id, _)| (*id).to_owned())
+                .collect();
+            if ready.is_empty() {
+                return Err(invalid("pipeline graph has a cycle".to_owned()));
+            }
+            for id in &ready {
+                blocked_by.remove(id.as_str());
+            }
+            for dependencies in blocked_by.values_mut() {
+                dependencies.retain(|dependency| !ready.iter().any(|id| id == dependency));
+            }
+            waves.push(ready);
+        }
+        Ok(waves)
     }
 
     fn port(&self, reference: &str, side: PortSide) -> Result<PortType, CoreError> {
@@ -193,6 +259,11 @@ enum PortSide {
     Output,
 }
 
+/// `node.port` 的机械拆分;校验在 [`PipelineV1::port`]。
+fn split_reference(reference: &str) -> (&str, &str) {
+    reference.split_once('.').unwrap_or((reference, ""))
+}
+
 fn invalid(reason: String) -> CoreError {
     CoreError::InvalidPipeline { reason }
 }
@@ -211,5 +282,88 @@ impl AssetDefinition for PipelineDefinition {
         let Self::V1(pipeline) = &definition;
         pipeline.validate()?;
         Ok(definition)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(id: &str, kind: NodeKind) -> Node {
+        Node {
+            id: id.to_owned(),
+            kind,
+        }
+    }
+
+    fn edge(from: &str, to: &str) -> Edge {
+        Edge {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        }
+    }
+
+    fn generate(id: &str) -> Node {
+        node(
+            id,
+            NodeKind::Generate {
+                model_param: "model".to_owned(),
+                channel_param: "channel".to_owned(),
+                stream: true,
+            },
+        )
+    }
+
+    /// 图的两条纪律:无依赖的节点同层(并行分支),有环即加载失败。
+    #[test]
+    fn independent_nodes_share_a_wave_and_cycles_are_rejected() {
+        let mut pipeline = PipelineV1 {
+            nodes: vec![
+                node("ctx", NodeKind::ContextBuild { slots: Vec::new() }),
+                generate("a"),
+                generate("b"),
+            ],
+            edges: vec![
+                edge("ctx.prompt", "a.prompt"),
+                edge("ctx.prompt", "b.prompt"),
+            ],
+            ..Default::default()
+        };
+        let waves = pipeline.topological_order().unwrap();
+        assert_eq!(
+            waves,
+            vec![vec!["ctx".to_owned()], vec!["a".to_owned(), "b".to_owned()]]
+        );
+        pipeline.validate().unwrap();
+
+        // 类型不匹配的边在加载期就拒绝。
+        pipeline.edges.push(edge("a.result", "b.prompt"));
+        assert!(matches!(
+            pipeline.validate(),
+            Err(CoreError::InvalidPipeline { .. })
+        ));
+
+        let cyclic = PipelineV1 {
+            nodes: vec![
+                node(
+                    "x",
+                    NodeKind::TextTransform {
+                        regex_slots: Vec::new(),
+                    },
+                ),
+                node(
+                    "y",
+                    NodeKind::TextTransform {
+                        regex_slots: Vec::new(),
+                    },
+                ),
+            ],
+            edges: vec![edge("x.output", "y.input"), edge("y.output", "x.input")],
+            ..Default::default()
+        };
+        assert!(matches!(
+            cyclic.topological_order(),
+            Err(CoreError::InvalidPipeline { .. })
+        ));
     }
 }
