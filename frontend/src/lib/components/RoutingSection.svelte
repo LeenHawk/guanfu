@@ -25,7 +25,7 @@
       targetOperation: RoutingOperation,
       targetKind: RoutingKind,
     ) => Promise<void>;
-    onremove: (id: number) => Promise<void>;
+    onremove: (id: number) => void;
   } = $props();
 
   let adding = $state(false);
@@ -145,9 +145,7 @@
             class="danger-link"
             type="button"
             disabled={submitting}
-            onclick={() =>
-              confirm(m.confirm_delete_item()) && onremove(rule.id)}
-            >{m.delete()}</button
+            onclick={() => onremove(rule.id)}>{m.delete()}</button
           >
         </div>
       {/each}

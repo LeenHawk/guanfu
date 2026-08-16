@@ -14,6 +14,7 @@
     credentials,
     rules,
     submitting,
+    busy,
     ontoggle,
     ondelete,
     onaddcredential,
@@ -25,14 +26,15 @@
     credentials: CredentialDto[];
     rules: RoutingRuleDto[];
     submitting: boolean;
+    busy: boolean;
     ontoggle: () => Promise<void>;
-    ondelete: () => Promise<void>;
+    ondelete: () => void;
     onaddcredential: (
       label: string,
       secret: string,
       weight: number,
     ) => Promise<void>;
-    onremovecredential: (id: number) => Promise<void>;
+    onremovecredential: (id: number) => void;
     onputroute: (
       operation: RoutingOperation,
       kind: RoutingKind,
@@ -40,11 +42,11 @@
       targetOperation: RoutingOperation,
       targetKind: RoutingKind,
     ) => Promise<void>;
-    onremoveroute: (id: number) => Promise<void>;
+    onremoveroute: (id: number) => void;
   } = $props();
 </script>
 
-<main class="workspace">
+<main class="workspace" aria-busy={busy}>
   <header class="workspace-header">
     <div>
       <h2>{channel.name}</h2>
@@ -63,8 +65,8 @@
       <button
         class="danger-link"
         type="button"
-        onclick={() => confirm(m.confirm_delete_channel()) && ondelete()}
-        >{m.delete()}</button
+        disabled={submitting}
+        onclick={ondelete}>{m.delete()}</button
       >
     </div>
   </header>

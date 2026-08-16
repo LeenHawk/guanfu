@@ -10,6 +10,7 @@
   import ChannelDialog from "$lib/components/ChannelDialog.svelte";
   import ChannelSidebar from "$lib/components/ChannelSidebar.svelte";
   import ChannelWorkspace from "$lib/components/ChannelWorkspace.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { messageForError } from "$lib/i18n/errors";
   import { m } from "$lib/paraglide/messages.js";
 
@@ -18,9 +19,14 @@
   let rules = $state<RoutingRuleDto[]>([]);
   let selectedId = $state<number | null>(null);
   let loading = $state(true);
+  let switching = $state(false);
   let submitting = $state(false);
   let dialogOpen = $state(false);
   let errorCode = $state<string | null>(null);
+  let confirming = $state<{
+    message: string;
+    action: () => Promise<void>;
+  } | null>(null);
   let selected = $derived(
     channels.find((channel) => channel.id === selectedId) ?? null,
   );
@@ -29,16 +35,20 @@
     void loadChannels();
   });
 
+  function captureError(error: unknown) {
+    errorCode =
+      error instanceof ApiClientError
+        ? error.payload.code
+        : "upstream_unavailable";
+  }
+
   async function run(task: () => Promise<void>) {
     submitting = true;
     errorCode = null;
     try {
       await task();
     } catch (error) {
-      errorCode =
-        error instanceof ApiClientError
-          ? error.payload.code
-          : "upstream_unavailable";
+      captureError(error);
     } finally {
       submitting = false;
     }
@@ -51,10 +61,7 @@
       if (selectedId === null && channels.length > 0)
         await selectChannel(channels[0].id);
     } catch (error) {
-      errorCode =
-        error instanceof ApiClientError
-          ? error.payload.code
-          : "upstream_unavailable";
+      captureError(error);
     } finally {
       loading = false;
     }
@@ -62,10 +69,26 @@
 
   async function selectChannel(id: number) {
     selectedId = id;
-    [credentials, rules] = await Promise.all([
-      api.listCredentials(id),
-      api.listRoutingRules(id),
-    ]);
+    switching = true;
+    try {
+      [credentials, rules] = await Promise.all([
+        api.listCredentials(id),
+        api.listRoutingRules(id),
+      ]);
+    } finally {
+      switching = false;
+    }
+  }
+
+  function requestConfirm(message: string, action: () => Promise<void>) {
+    confirming = { message, action };
+  }
+
+  async function runConfirmed() {
+    const current = confirming;
+    if (!current) return;
+    await run(current.action);
+    confirming = null;
   }
 
   async function createChannel(name: string, baseUrl: string) {
@@ -83,7 +106,13 @@
 <div class="app-shell">
   <AppHeader />
   {#if errorCode}<div class="error-banner" role="alert">
-      {messageForError(errorCode)}
+      <span>{messageForError(errorCode)}</span>
+      <button
+        class="banner-close"
+        type="button"
+        aria-label={m.dismiss()}
+        onclick={() => (errorCode = null)}>×</button
+      >
     </div>{/if}
   {#if loading}
     <main class="center-state"><p>{m.loading()}</p></main>
@@ -112,6 +141,7 @@
           {credentials}
           {rules}
           {submitting}
+          busy={switching}
           ontoggle={() =>
             run(async () => {
               await api.setChannelEnabled(selected!.id, !selected!.enabled);
@@ -122,7 +152,7 @@
               );
             })}
           ondelete={() =>
-            run(async () => {
+            requestConfirm(m.confirm_delete_channel(), async () => {
               await api.deleteChannel(selected!.id);
               channels = channels.filter((item) => item.id !== selected!.id);
               selectedId = channels[0]?.id ?? null;
@@ -139,7 +169,7 @@
               credentials = [...credentials, item];
             })}
           onremovecredential={(id) =>
-            run(async () => {
+            requestConfirm(m.confirm_delete_item(), async () => {
               await api.removeCredential(id);
               credentials = credentials.filter((item) => item.id !== id);
             })}
@@ -178,7 +208,7 @@
               ];
             })}
           onremoveroute={(id) =>
-            run(async () => {
+            requestConfirm(m.confirm_delete_item(), async () => {
               await api.removeRoutingRule(id);
               rules = rules.filter((item) => item.id !== id);
             })}
@@ -195,4 +225,12 @@
   {submitting}
   onclose={() => (dialogOpen = false)}
   onsubmit={createChannel}
+/>
+
+<ConfirmDialog
+  open={confirming !== null}
+  message={confirming?.message ?? ""}
+  {submitting}
+  onconfirm={() => void runConfirmed()}
+  oncancel={() => (confirming = null)}
 />

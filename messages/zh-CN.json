@@ -85,5 +85,6 @@
   "kind_gemini_generate_content": "Gemini GenerateContent",
   "kind_open_ai": "OpenAI",
   "kind_claude": "Claude",
-  "kind_gemini": "Gemini"
+  "kind_gemini": "Gemini",
+  "dismiss": "关闭"
 }

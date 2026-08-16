@@ -11,7 +11,7 @@
     credentials: CredentialDto[];
     submitting: boolean;
     onadd: (label: string, secret: string, weight: number) => Promise<void>;
-    onremove: (id: number) => Promise<void>;
+    onremove: (id: number) => void;
   } = $props();
 
   let adding = $state(false);
@@ -78,9 +78,8 @@
           <button
             class="danger-link"
             type="button"
-            onclick={() =>
-              confirm(m.confirm_delete_item()) && onremove(credential.id)}
-            >{m.delete()}</button
+            disabled={submitting}
+            onclick={() => onremove(credential.id)}>{m.delete()}</button
           >
         </div>
       {/each}
