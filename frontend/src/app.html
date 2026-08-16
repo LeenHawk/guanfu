@@ -15,7 +15,11 @@
         ? "%sveltekit.assets%/favicon-dark.svg"
         : "%sveltekit.assets%/favicon.png";
       const locale = localStorage.getItem("PARAGLIDE_LOCALE");
-      if (locale) document.documentElement.lang = locale;
+      // 与 $lib/i18n/locale.ts 的 htmlLang 保持一致:繁体要带字形子标签,
+      // 否则 CSS 的 :lang(zh-Hant) 选不到繁体字体。
+      if (locale)
+        document.documentElement.lang =
+          locale === "zh-TW" ? "zh-Hant-TW" : locale;
     </script>
     <title>观复</title>
     %sveltekit.head%

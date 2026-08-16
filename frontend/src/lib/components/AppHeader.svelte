@@ -3,6 +3,7 @@
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
   import { getLocale, setLocale } from "$lib/paraglide/runtime.js";
+  import { htmlLang, type Locale } from "$lib/i18n/locale";
   import { applyTheme, savedTheme, type Theme } from "$lib/ui/theme";
 
   let theme = $state<Theme>(savedTheme());
@@ -26,8 +27,8 @@
   }
 
   function changeLocale(event: Event) {
-    locale = (event.currentTarget as HTMLSelectElement).value as "zh-CN" | "en";
-    document.documentElement.lang = locale;
+    locale = (event.currentTarget as HTMLSelectElement).value as Locale;
+    document.documentElement.lang = htmlLang(locale);
     setLocale(locale);
   }
 </script>
@@ -63,7 +64,8 @@
     <label>
       <span class="sr-only">{m.language()}</span>
       <select value={locale} onchange={changeLocale} aria-label={m.language()}>
-        <option value="zh-CN">中文</option>
+        <option value="zh-CN">简体中文</option>
+        <option value="zh-TW">繁體中文</option>
         <option value="en">English</option>
       </select>
     </label>
