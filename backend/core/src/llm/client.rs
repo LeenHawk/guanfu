@@ -1,4 +1,3 @@
-use std::sync::Once;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -35,12 +34,7 @@ impl LlmClient {
     }
 
     pub fn with_timeouts(connect_timeout: Duration, request_timeout: Duration) -> Self {
-        static INSTALL_RUSTLS_PROVIDER: Once = Once::new();
-        INSTALL_RUSTLS_PROVIDER.call_once(|| {
-            // reqwest 0.13 的 `rustls-no-provider` 允许选择 ring，避免默认
-            // AWS-LC provider；若宿主已安装 provider，则保留宿主选择。
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        });
+        crate::llm::install_crypto_provider();
         let http = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             // 流式响应不设整请求超时,靠逐次读的空闲超时兜底。

@@ -36,6 +36,8 @@ eventsource-stream = "0.2"
 async-stream = "0.3"
 tracing = "0.1"
 sha2 = "0.10"
+hmac = "0.12"
+async-trait = "0.1"
 hex = "0.4"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use sea_orm::DatabaseConnection;
 
-use crate::assets::{AssetStore, LocalAssetStore};
+use crate::assets::{AssetStore, LocalAssetStore, S3AssetStore};
 use crate::services::llm::LlmService;
 use crate::{db, CoreError};
 
@@ -47,10 +47,21 @@ impl AppState {
             config.llm.connect_timeout,
             config.llm.request_timeout,
         ));
-        std::fs::create_dir_all(&config.asset_root).map_err(|error| CoreError::AssetStore {
-            reason: error.to_string(),
-        })?;
-        let assets = Arc::new(LocalAssetStore::new(config.asset_root.clone()));
+        // 配了 S3 就用对象存储,否则本地目录;多实例部署必须走前者。
+        let assets: Arc<dyn AssetStore> = match S3AssetStore::from_env() {
+            Some(s3) => {
+                tracing::info!(bucket = %s3.bucket, "using s3 asset store");
+                Arc::new(S3AssetStore::new(s3))
+            }
+            None => {
+                std::fs::create_dir_all(&config.asset_root).map_err(|error| {
+                    CoreError::AssetStore {
+                        reason: error.to_string(),
+                    }
+                })?;
+                Arc::new(LocalAssetStore::new(config.asset_root.clone()))
+            }
+        };
         Ok(Self {
             db,
             llm,

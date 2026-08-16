@@ -11,14 +11,15 @@ use crate::CoreError;
 
 /// 按内容哈希寻址的对象存储。
 ///
-/// Tauri 与单实例 Axum 用本地目录;多实例 Axum 后续换 S3 兼容实现,
-/// 调用方只看这个 trait。
+/// 接口是异步的:本地目录用不上,但对象存储是网络调用,让它同步会把
+/// 运行时线程堵住。
+#[async_trait::async_trait]
 pub trait AssetStore: Send + Sync + std::fmt::Debug {
     /// 幂等写入:同一哈希重复写视为已存在。
-    fn put(&self, hash: &ChunkHash, bytes: &[u8]) -> Result<(), CoreError>;
-    fn get(&self, hash: &ChunkHash) -> Result<Vec<u8>, CoreError>;
-    fn exists(&self, hash: &ChunkHash) -> bool;
-    fn delete(&self, hash: &ChunkHash) -> Result<(), CoreError>;
+    async fn put(&self, hash: &ChunkHash, bytes: &[u8]) -> Result<(), CoreError>;
+    async fn get(&self, hash: &ChunkHash) -> Result<Vec<u8>, CoreError>;
+    async fn exists(&self, hash: &ChunkHash) -> bool;
+    async fn delete(&self, hash: &ChunkHash) -> Result<(), CoreError>;
 }
 
 /// 本地目录实现;按哈希前两位分桶,避免单目录条目过多。
@@ -38,8 +39,9 @@ impl LocalAssetStore {
     }
 }
 
+#[async_trait::async_trait]
 impl AssetStore for LocalAssetStore {
-    fn put(&self, hash: &ChunkHash, bytes: &[u8]) -> Result<(), CoreError> {
+    async fn put(&self, hash: &ChunkHash, bytes: &[u8]) -> Result<(), CoreError> {
         let path = self.path_of(hash);
         if path.exists() {
             return Ok(());
@@ -53,15 +55,15 @@ impl AssetStore for LocalAssetStore {
         std::fs::rename(&temporary, &path).map_err(store_error)
     }
 
-    fn get(&self, hash: &ChunkHash) -> Result<Vec<u8>, CoreError> {
+    async fn get(&self, hash: &ChunkHash) -> Result<Vec<u8>, CoreError> {
         std::fs::read(self.path_of(hash)).map_err(|_| CoreError::ChunkMissing(hash.0.clone()))
     }
 
-    fn exists(&self, hash: &ChunkHash) -> bool {
+    async fn exists(&self, hash: &ChunkHash) -> bool {
         self.path_of(hash).exists()
     }
 
-    fn delete(&self, hash: &ChunkHash) -> Result<(), CoreError> {
+    async fn delete(&self, hash: &ChunkHash) -> Result<(), CoreError> {
         match std::fs::remove_file(self.path_of(hash)) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -70,7 +72,7 @@ impl AssetStore for LocalAssetStore {
     }
 }
 
-fn store_error(error: std::io::Error) -> CoreError {
+pub(crate) fn store_error(error: impl std::fmt::Display) -> CoreError {
     CoreError::AssetStore {
         reason: error.to_string(),
     }

@@ -26,6 +26,7 @@ pub mod pipeline;
 pub mod preset;
 pub mod refs;
 pub mod regex_script;
+pub mod s3;
 pub mod store;
 pub mod world_book;
 
@@ -37,6 +38,7 @@ pub use pipeline::PipelineDefinition;
 pub use preset::OpenAiChatPresetDefinition;
 pub use refs::Extra;
 pub use regex_script::RegexScriptDefinition;
+pub use s3::{S3AssetStore, S3Config};
 pub use store::{AssetStore, LocalAssetStore};
 pub use world_book::WorldBookDefinition;
 

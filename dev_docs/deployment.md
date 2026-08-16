@@ -31,6 +31,12 @@ GUANFU_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
 | `GUANFU_ADDRESS` | `127.0.0.1:3000` | 监听地址 |
 | `GUANFU_ASSET_ROOT` | `guanfu-assets` | 二进制资产目录 |
 | `GUANFU_TOKEN` | 无 | 共享访问令牌 |
+| `GUANFU_S3_ENDPOINT` | 无 | 对象存储端点(不含桶名);配齐四项即启用 S3 |
+| `GUANFU_S3_BUCKET` | 无 | 桶名 |
+| `GUANFU_S3_ACCESS_KEY_ID` | 无 | 访问密钥 ID |
+| `GUANFU_S3_SECRET_ACCESS_KEY` | 无 | 访问密钥 |
+| `GUANFU_S3_REGION` | `auto` | 区域(R2 用 `auto`,AWS 用真实区域) |
+| `GUANFU_S3_PREFIX` | `chunks` | 对象键前缀 |
 | `RUST_LOG` | 无 | 日志过滤(如 `guanfu_core=debug`) |
 
 前端静态产物由 `pnpm --filter frontend build` 生成到 `frontend/build/`,
@@ -56,8 +62,8 @@ GUANFU_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
   不影响正确性。
 
 **存储是唯一的硬约束**:`LocalAssetStore` 写本机目录,多实例各写各的,
-一个实例存的图另一个读不到。多实例部署要么共用网络文件系统,要么等
-`AssetStore` 的 S3 实现(trait 已就位,实现待补)。
+一个实例存的图另一个读不到。多实例部署必须配 `GUANFU_S3_*` 走对象存储
+(已对 Cloudflare R2 实测)。
 
 SQLite 同样是单机方案;多实例应换成独立数据库服务。
 

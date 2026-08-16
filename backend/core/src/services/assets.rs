@@ -221,7 +221,7 @@ impl AssetService {
         bytes: &[u8],
     ) -> Result<AssetHeadDto, CoreError> {
         let hash = crate::assets::chunk_hash(bytes);
-        store.put(&hash, bytes)?;
+        store.put(&hash, bytes).await?;
         let size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
         chunk::Entity::insert(chunk::ActiveModel {
             hash: Set(hash.0.clone()),
@@ -259,7 +259,7 @@ impl AssetService {
     ) -> Result<(crate::assets::media::MediaV1, Vec<u8>), CoreError> {
         let loaded = Self::load::<crate::assets::MediaDefinition>(db, id).await?;
         let crate::assets::MediaDefinition::V1(media) = loaded.definition;
-        let bytes = store.get(&media.hash)?;
+        let bytes = store.get(&media.hash).await?;
         Ok((media, bytes))
     }
 }

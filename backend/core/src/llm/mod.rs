@@ -16,3 +16,15 @@ pub mod wire;
 pub fn count_tokens_local(model: &str, body: &[u8]) -> u64 {
     gproxy_tokenize::count(model, body, None, ())
 }
+
+/// 安装 rustls 的加密后端。
+///
+/// `rustls-no-provider` 让我们选 ring 而不是默认的 AWS-LC;每个自建
+/// reqwest client 之前都得先跑这一次,否则构造时直接 panic。
+pub fn install_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // 宿主已装则保留宿主选择。
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
