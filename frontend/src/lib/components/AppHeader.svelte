@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { resolve } from "$app/paths";
+  import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
   import { getLocale, setLocale } from "$lib/paraglide/runtime.js";
   import { applyTheme, savedTheme, type Theme } from "$lib/ui/theme";
@@ -39,6 +41,16 @@
     </div>
   </div>
   <div class="preferences">
+    <nav class="app-nav" aria-label={m.app_subtitle()}>
+      <a href={resolve("/")} class:active={page.url.pathname === "/"}
+        >{m.nav_chat()}</a
+      >
+      <a
+        href={resolve("/channels")}
+        class:active={page.url.pathname.startsWith("/channels")}
+        >{m.nav_channels()}</a
+      >
+    </nav>
     <label>
       <span class="sr-only">{m.language()}</span>
       <select value={locale} onchange={changeLocale} aria-label={m.language()}>

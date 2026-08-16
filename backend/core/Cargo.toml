@@ -33,6 +33,7 @@ base64 = "0.22"
 http = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 eventsource-stream = "0.2"
+async-stream = "0.3"
 tracing = "0.1"
 sha2 = "0.10"
 hex = "0.4"

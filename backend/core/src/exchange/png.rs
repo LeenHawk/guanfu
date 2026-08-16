@@ -83,7 +83,10 @@ fn chunks(png: &[u8]) -> Result<Vec<Chunk>, CoreError> {
     Ok(chunks)
 }
 
-fn text_chunks(png: &[u8]) -> Result<Vec<(&[u8], &[u8])>, CoreError> {
+/// 一个 tEXt chunk 的 (keyword, value)。
+type TextChunk<'a> = (&'a [u8], &'a [u8]);
+
+fn text_chunks(png: &[u8]) -> Result<Vec<TextChunk<'_>>, CoreError> {
     let mut found = Vec::new();
     for chunk in chunks(png)? {
         if &png[chunk.start + 4..chunk.start + 8] != b"tEXt" {

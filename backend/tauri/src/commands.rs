@@ -1,10 +1,16 @@
+use guanfu_core::assets::chat_history::SessionBindings;
+use guanfu_core::entities::asset::AssetKind;
 use guanfu_core::error::ApiError;
 use guanfu_core::llm::ir::OperationResponse;
+use guanfu_core::services::assets::{AssetHeadDto, AssetService};
 use guanfu_core::services::channels::{
     ChannelDto, ChannelService, CredentialDto, NewChannel, NewCredential,
 };
+use guanfu_core::services::chat::{ChatBootstrap, ChatHistoryView, ChatService};
+use guanfu_core::services::exchange::{ExchangeService, ImportedCharacter};
 use guanfu_core::services::llm::{SemanticLlmOutput, SemanticLlmRequest, SemanticStreamMessage};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingRuleDto, RoutingService};
+use guanfu_core::services::runner::{ChatRunRequest, PipelineEvent, RunnerService};
 use guanfu_core::{AppState, CoreError};
 use tauri::{ipc::Channel, State};
 use tokio_util::sync::CancellationToken;
@@ -189,4 +195,96 @@ pub async fn remove_routing_rule(state: State<'_, AppState>, id: i32) -> Result<
     RoutingService::remove_rule(&state.db, id)
         .await
         .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn list_assets(
+    state: State<'_, AppState>,
+    kind: Option<AssetKind>,
+) -> Result<Vec<AssetHeadDto>, ApiError> {
+    AssetService::list(&state.db, kind).await.map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn delete_asset(state: State<'_, AppState>, id: i32) -> Result<(), ApiError> {
+    AssetService::delete(&state.db, id).await.map_err(api_error)
+}
+
+/// 角色卡导入:PNG 与 JSON 同一入口,按魔数分辨。
+#[tauri::command]
+pub async fn import_character(
+    state: State<'_, AppState>,
+    bytes: Vec<u8>,
+) -> Result<ImportedCharacter, ApiError> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        ExchangeService::import_ccv2_png(&state.db, &bytes).await
+    } else {
+        ExchangeService::import_ccv2_json(&state.db, &bytes).await
+    }
+    .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn bootstrap_chat(state: State<'_, AppState>) -> Result<ChatBootstrap, ApiError> {
+    ChatService::bootstrap(&state.db).await.map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn create_chat_history(
+    state: State<'_, AppState>,
+    title: String,
+    bindings: SessionBindings,
+) -> Result<AssetHeadDto, ApiError> {
+    ChatService::create_history(&state.db, &title, bindings)
+        .await
+        .map_err(api_error)
+}
+
+#[tauri::command]
+pub async fn load_chat_history(
+    state: State<'_, AppState>,
+    id: i32,
+) -> Result<ChatHistoryView, ApiError> {
+    ChatService::load_history(&state.db, id)
+        .await
+        .map_err(api_error)
+}
+
+/// 聊天 run:pipeline 事件走 Channel,取消复用 LLM 的取消表。
+#[tauri::command]
+pub async fn run_chat(
+    state: State<'_, AppState>,
+    active: State<'_, ActiveLlmRequests>,
+    request_id: String,
+    input: ChatRunRequest,
+    on_event: Channel<PipelineEvent>,
+) -> Result<(), ApiError> {
+    use futures_util::StreamExt;
+
+    let cancellation = CancellationToken::new();
+    active
+        .0
+        .lock()
+        .expect("active request lock poisoned")
+        .insert(request_id.clone(), cancellation.clone());
+    let started = RunnerService::run_chat(state.db.clone(), state.llm.clone(), input).await;
+    let result = match started {
+        Ok(events) => {
+            let mut events = std::pin::pin!(events);
+            loop {
+                let event = tokio::select! {
+                    event = events.next() => event,
+                    () = cancellation.cancelled() => break,
+                };
+                let Some(event) = event else { break };
+                if on_event.send(event).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        }
+        Err(error) => Err(api_error(error)),
+    };
+    forget_request(&active, &request_id);
+    result
 }

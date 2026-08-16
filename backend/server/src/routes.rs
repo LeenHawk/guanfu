@@ -4,11 +4,17 @@ use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, put};
 use axum::{Json, Router};
+use guanfu_core::assets::chat_history::SessionBindings;
+use guanfu_core::entities::asset::AssetKind;
 use guanfu_core::error::ApiError;
 use guanfu_core::llm::codec::OperationEvent;
+use guanfu_core::services::assets::AssetService;
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
+use guanfu_core::services::chat::ChatService;
+use guanfu_core::services::exchange::ExchangeService;
 use guanfu_core::services::llm::{SemanticLlmOutput, SemanticLlmRequest, SemanticStreamMessage};
 use guanfu_core::services::routing::{PutRoutingRule, RoutingService};
+use guanfu_core::services::runner::{ChatRunRequest, RunnerService};
 use guanfu_core::{AppState, CoreError};
 
 pub fn router(state: AppState) -> Router {
@@ -27,6 +33,19 @@ pub fn router(state: AppState) -> Router {
         .route("/api/credentials/{id}", delete(remove_credential))
         .route("/api/routing-rules/{id}", delete(remove_routing_rule))
         .route("/api/llm", axum::routing::post(execute_llm))
+        .route("/api/assets", get(list_assets))
+        .route("/api/assets/{id}", delete(delete_asset))
+        .route(
+            "/api/characters/import",
+            axum::routing::post(import_character),
+        )
+        .route("/api/chat/bootstrap", axum::routing::post(bootstrap_chat))
+        .route(
+            "/api/chat/histories",
+            get(list_histories).post(create_history),
+        )
+        .route("/api/chat/histories/{id}", get(load_history))
+        .route("/api/chat/runs", axum::routing::post(run_chat))
         .with_state(state)
 }
 
@@ -65,6 +84,101 @@ async fn execute_llm(
             }
             .into())
         }
+    }
+}
+
+async fn list_assets(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<AssetQuery>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(AssetService::list(&state.db, query.kind).await?))
+}
+
+#[derive(serde::Deserialize)]
+struct AssetQuery {
+    kind: Option<AssetKind>,
+}
+
+async fn delete_asset(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<StatusCode, HttpError> {
+    AssetService::delete(&state.db, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 角色卡导入:PNG 与 JSON 同一入口,按魔数分辨。
+async fn import_character(
+    State(state): State<AppState>,
+    body: axum::body::Bytes,
+) -> Result<impl IntoResponse, HttpError> {
+    let imported = if body.starts_with(&[0x89, b'P', b'N', b'G']) {
+        ExchangeService::import_ccv2_png(&state.db, &body).await?
+    } else {
+        ExchangeService::import_ccv2_json(&state.db, &body).await?
+    };
+    Ok((StatusCode::CREATED, Json(imported)))
+}
+
+async fn bootstrap_chat(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(ChatService::bootstrap(&state.db).await?))
+}
+
+async fn list_histories(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        AssetService::list(&state.db, Some(AssetKind::ChatHistory)).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+struct NewHistory {
+    title: String,
+    #[serde(default)]
+    bindings: SessionBindings,
+}
+
+async fn create_history(
+    State(state): State<AppState>,
+    Json(input): Json<NewHistory>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok((
+        StatusCode::CREATED,
+        Json(ChatService::create_history(&state.db, &input.title, input.bindings).await?),
+    ))
+}
+
+async fn load_history(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(ChatService::load_history(&state.db, id).await?))
+}
+
+/// 聊天 run:pipeline 事件以 SSE 推给前端;客户端断开即取消。
+async fn run_chat(
+    State(state): State<AppState>,
+    Json(input): Json<ChatRunRequest>,
+) -> Result<Response, HttpError> {
+    use futures_util::StreamExt;
+    let events = RunnerService::run_chat(state.db.clone(), state.llm.clone(), input).await?;
+    let stream = events.map(|event| {
+        Ok::<_, std::convert::Infallible>(
+            Event::default()
+                .event(pipeline_event_name(&event))
+                .json_data(event)
+                .expect("pipeline events are serializable"),
+        )
+    });
+    Ok(Sse::new(stream).into_response())
+}
+
+fn pipeline_event_name(event: &guanfu_core::services::runner::PipelineEvent) -> &'static str {
+    use guanfu_core::services::runner::PipelineEvent;
+    match event {
+        PipelineEvent::Started { .. } => "started",
+        PipelineEvent::Progress { .. } => "progress",
+        PipelineEvent::Committed { .. } => "committed",
+        PipelineEvent::Failed { .. } => "failed",
     }
 }
 

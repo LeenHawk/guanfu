@@ -44,6 +44,13 @@ pub fn run() {
             commands::remove_routing_rule,
             commands::execute_llm,
             commands::cancel_llm,
+            commands::list_assets,
+            commands::delete_asset,
+            commands::import_character,
+            commands::bootstrap_chat,
+            commands::create_chat_history,
+            commands::load_chat_history,
+            commands::run_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
