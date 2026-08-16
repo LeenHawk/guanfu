@@ -77,6 +77,7 @@ pub enum Capability {
     Embeddings,
     ImageGeneration,
     ImageEditing,
+    VideoGeneration,
     Speech,
     Transcription,
     Translation,

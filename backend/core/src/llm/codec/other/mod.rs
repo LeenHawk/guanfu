@@ -19,6 +19,7 @@ use crate::llm::ir::models::*;
 use crate::llm::ir::platform::*;
 use crate::llm::ir::search::*;
 use crate::llm::ir::tokens::*;
+use crate::llm::ir::video::*;
 use crate::llm::ir::{Capability, MediaSource, ModelId, OperationRequest, OperationResponse};
 use crate::llm::wire::{
     JsonBody, MultipartBody, MultipartPart, MultipartValue, QueryParam, RequestBody, ResponseMode,
@@ -87,6 +88,31 @@ pub fn decode(
             WireResponse::BinaryStream(response),
         ) => stream::decode_speech_stream(request, response),
         (OperationRequest::Audio(AudioRequest::Speech(_)), _) => Err(mode_error()),
+        (
+            OperationRequest::Video(VideoRequest::DownloadContent(_)),
+            WireResponse::Binary(response),
+        ) => Ok(DecodedResponse::Complete(OperationResponse::Video(
+            VideoResponse::Content(VideoContent {
+                media_type: response.content_type,
+                bytes: response.body,
+            }),
+        ))),
+        (
+            OperationRequest::Platform(PlatformRequest::CreateRealtimeCall(_)),
+            WireResponse::Binary(response),
+        ) => Ok(DecodedResponse::Complete(OperationResponse::Platform(
+            PlatformResponse::RealtimeCall(RealtimeCall {
+                id: response
+                    .metadata
+                    .headers
+                    .get(http::header::LOCATION)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|path| path.rsplit('/').next())
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned),
+                answer_sdp: String::from_utf8_lossy(&response.body).into_owned(),
+            }),
+        ))),
         (_, WireResponse::Json(response)) => {
             let body = transform_response(
                 target,
@@ -407,6 +433,11 @@ fn request_capability(operation: Operation) -> Capability {
         Operation::CreateEmbedding => Capability::Embeddings,
         Operation::CreateImage => Capability::ImageGeneration,
         Operation::EditImage => Capability::ImageEditing,
+        Operation::CreateVideo
+        | Operation::RetrieveVideo
+        | Operation::ListVideos
+        | Operation::DeleteVideo
+        | Operation::DownloadVideoContent => Capability::VideoGeneration,
         Operation::CreateSpeech => Capability::Speech,
         Operation::CreateTranscription => Capability::Transcription,
         Operation::CreateTranslation => Capability::Translation,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{MediaSource, ModelId, OperationFailure, OutputId, Usage};
+use super::{MediaSource, ModelId, OutputId, Usage};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -104,11 +104,9 @@ pub struct ImageArtifact {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageEvent {
-    Started,
     Preview(ImagePreview),
     Progress(ImageProgress),
     Finished(ImageResponse),
-    Failed(OperationFailure),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]

@@ -19,6 +19,7 @@ pub enum OutputItem {
     Compaction(CompactionOutput),
     ToolCall(ToolCall),
     ToolExecution(ToolExecution),
+    McpApprovalRequest(McpApprovalRequest),
     Image(ImageArtifact),
     Audio(AudioArtifact),
 }
@@ -31,6 +32,7 @@ impl OutputItem {
             Self::Compaction(value) => &value.id,
             Self::ToolCall(value) => value.output_id(),
             Self::ToolExecution(value) => &value.id,
+            Self::McpApprovalRequest(value) => &value.id,
             Self::Image(value) => &value.id,
             Self::Audio(value) => &value.id,
         }
@@ -128,16 +130,9 @@ impl ReasoningContinuation {
 pub enum ToolCall {
     Function(FunctionCall),
     Custom(CustomToolCall),
-    WebSearch(HostedToolCall),
-    WebFetch(HostedToolCall),
-    FileSearch(HostedToolCall),
     ComputerUse(ComputerActionCall),
-    CodeExecution(CodeExecutionCall),
     Shell(ShellCall),
     TextEditor(TextEditorCall),
-    ImageGeneration(ImageGenerationCall),
-    Mcp(McpCall),
-    Memory(MemoryCall),
     ToolSearch(ToolSearchCall),
 }
 
@@ -146,14 +141,9 @@ impl ToolCall {
         match self {
             Self::Function(v) => &v.id,
             Self::Custom(v) => &v.id,
-            Self::WebSearch(v) | Self::WebFetch(v) | Self::FileSearch(v) => &v.id,
             Self::ComputerUse(v) => &v.id,
-            Self::CodeExecution(v) => &v.id,
             Self::Shell(v) => &v.id,
             Self::TextEditor(v) => &v.id,
-            Self::ImageGeneration(v) => &v.id,
-            Self::Mcp(v) => &v.id,
-            Self::Memory(v) => &v.id,
             Self::ToolSearch(v) => &v.id,
         }
     }
@@ -176,14 +166,6 @@ pub struct CustomToolCall {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-pub struct HostedToolCall {
-    pub id: OutputId,
-    pub call_id: ToolCallId,
-    pub name: String,
-    pub input: serde_json::Value,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ComputerActionCall {
     pub id: OutputId,
     pub call_id: ToolCallId,
@@ -201,22 +183,12 @@ macro_rules! json_call {
     };
 }
 
-json_call!(CodeExecutionCall);
 json_call!(ShellCall);
 json_call!(TextEditorCall);
-json_call!(ImageGenerationCall);
-json_call!(MemoryCall);
 json_call!(ToolSearchCall);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-pub struct McpCall {
-    pub id: OutputId,
-    pub call_id: ToolCallId,
-    pub server_label: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
+/// 服务端执行的托管工具（web_search / file_search / code_interpreter /
+/// image_generation / mcp 等）的调用与结果，调用方无需回传输出。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ToolExecution {
     pub id: OutputId,
@@ -224,6 +196,16 @@ pub struct ToolExecution {
     pub state: ToolExecutionState,
     pub output: Option<serde_json::Value>,
     pub error: Option<String>,
+}
+
+/// Responses 的 mcp_approval_request：模型请求批准调用某个 MCP 工具，
+/// 调用方以 [`super::McpApprovalResponse`] 回复。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+pub struct McpApprovalRequest {
+    pub id: OutputId,
+    pub server_label: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]

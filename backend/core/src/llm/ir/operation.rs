@@ -8,6 +8,7 @@ use super::models::{ModelRequest, ModelResponse};
 use super::platform::{PlatformRequest, PlatformResponse};
 use super::search::{SearchRequest, SearchResponse};
 use super::tokens::{CountTokensRequest, CountTokensResponse};
+use super::video::{VideoRequest, VideoResponse};
 use gproxy_protocol::Operation;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -20,6 +21,7 @@ pub enum OperationRequest {
     Images(ImageRequest),
     Audio(AudioRequest),
     Search(SearchRequest),
+    Video(VideoRequest),
     Platform(PlatformRequest),
 }
 
@@ -33,6 +35,7 @@ pub enum OperationResponse {
     Images(ImageResponse),
     Audio(AudioResponse),
     Search(SearchResponse),
+    Video(VideoResponse),
     Platform(PlatformResponse),
 }
 
@@ -54,6 +57,11 @@ impl OperationRequest {
             Self::Audio(AudioRequest::Translate(_)) => Operation::CreateTranslation,
             Self::Search(SearchRequest::Web(_)) => Operation::WebSearch,
             Self::Search(SearchRequest::Rerank(_)) => Operation::Rerank,
+            Self::Video(VideoRequest::Create(_)) => Operation::CreateVideo,
+            Self::Video(VideoRequest::Retrieve(_)) => Operation::RetrieveVideo,
+            Self::Video(VideoRequest::List(_)) => Operation::ListVideos,
+            Self::Video(VideoRequest::Delete(_)) => Operation::DeleteVideo,
+            Self::Video(VideoRequest::DownloadContent(_)) => Operation::DownloadVideoContent,
             Self::Platform(PlatformRequest::Compact(_)) => Operation::CompactContent,
             Self::Platform(PlatformRequest::CreateConversation(_)) => Operation::CreateConversation,
             Self::Platform(PlatformRequest::CreateRealtimeCall(_)) => Operation::CreateRealtimeCall,
@@ -77,12 +85,20 @@ impl OperationRequest {
                 request.model.as_ref().map(|model| model.0.as_str())
             }
             Self::Search(SearchRequest::Rerank(request)) => Some(&request.model.0),
+            // 视频资源 id 沿用端点合成的 model 参数槽约定。
+            Self::Video(VideoRequest::Create(request)) => Some(&request.model.0),
+            Self::Video(VideoRequest::Retrieve(request)) => Some(&request.id),
+            Self::Video(VideoRequest::List(_)) => None,
+            Self::Video(VideoRequest::Delete(request)) => Some(&request.id),
+            Self::Video(VideoRequest::DownloadContent(request)) => Some(&request.id),
             Self::Platform(PlatformRequest::Compact(request)) => Some(&request.model.0),
             Self::Platform(PlatformRequest::CreateConversation(_)) => None,
             Self::Platform(PlatformRequest::CreateRealtimeCall(request)) => {
                 Some(&request.session.model.0)
             }
-            Self::Platform(PlatformRequest::ConnectRealtime(request)) => Some(&request.model.0),
+            Self::Platform(PlatformRequest::ConnectRealtime(request)) => {
+                Some(&request.session.model.0)
+            }
         }
     }
 }

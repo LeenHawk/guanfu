@@ -8,7 +8,15 @@ use crate::llm::ir::{FileId, MediaSource, ToolCallId};
 pub enum InputItem {
     Message { message: Message },
     ToolResult { result: ToolResult },
+    McpApproval { approval: McpApprovalResponse },
     Reasoning { reasoning: ReasoningInput },
+}
+
+/// 对 [`super::McpApprovalRequest`] 的答复。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+pub struct McpApprovalResponse {
+    pub approval_request_id: String,
+    pub approve: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -96,7 +104,6 @@ pub enum ToolResultKind {
     CodeExecution,
     Shell,
     TextEditor,
-    Mcp,
     Memory,
     ToolSearch,
 }

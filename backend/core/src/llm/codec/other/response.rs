@@ -134,6 +134,29 @@ pub(super) fn decode_json(
                     .transpose()?,
             }))
         }
+        OperationRequest::Video(VideoRequest::Create(_) | VideoRequest::Retrieve(_)) => {
+            OperationResponse::Video(VideoResponse::Job(decode_video_job(&value, target)?))
+        }
+        OperationRequest::Video(VideoRequest::List(_)) => {
+            OperationResponse::Video(VideoResponse::Jobs(VideoJobList {
+                jobs: value
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|job| decode_video_job(job, target))
+                    .collect::<Result<_, _>>()?,
+                cursor: value
+                    .get("last_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            }))
+        }
+        OperationRequest::Video(VideoRequest::Delete(_)) => {
+            OperationResponse::Video(VideoResponse::Deleted(VideoDeleted {
+                id: required_str(&value, "id", target)?.into(),
+            }))
+        }
         OperationRequest::Platform(PlatformRequest::Compact(_)) => {
             OperationResponse::Platform(PlatformResponse::Compact(decode_compact(&value, target)?))
         }
@@ -159,8 +182,7 @@ fn decode_model(value: &Value, target: OperationKey) -> Result<Model, CoreError>
             .and_then(Value::as_str)
             .map(str::to_owned),
         created_at: value.get("created").and_then(Value::as_i64),
-        capabilities: None,
-        context_limit: value.get("context_window").and_then(Value::as_u64),
+        context_limit: value.get("max_input_tokens").and_then(Value::as_u64),
         output_limit: value.get("max_output_tokens").and_then(Value::as_u64),
     })
 }
@@ -241,8 +263,20 @@ pub(super) fn decode_transcription(
             })
             .collect::<Result<_, CoreError>>()?,
         segments: decode_segments(value, target)?,
-        usage: None,
+        usage: value
+            .get("usage")
+            .map(|usage| decode_audio_usage(usage, target))
+            .transpose()?,
     })
+}
+
+fn decode_audio_usage(value: &Value, target: OperationKey) -> Result<AudioUsage, CoreError> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("duration") => Ok(AudioUsage::Duration {
+            seconds: required_f64(value, "seconds", target)?,
+        }),
+        _ => Ok(AudioUsage::Tokens(decode_usage(value, target)?)),
+    }
 }
 fn decode_segments(
     value: &Value,
@@ -314,4 +348,59 @@ fn decode_string_map(
                 .ok_or_else(|| invalid_payload(target, "metadata values must be strings"))
         })
         .collect()
+}
+
+/// canonical OpenAI 视频任务 → 语义任务。Gemini 渠道经 gproxy 转换后,
+/// 完成的任务在 `gproxy_video_uri` 里携带 Veo 文件引用。
+fn decode_video_job(value: &Value, target: OperationKey) -> Result<VideoJob, CoreError> {
+    let id: String = required_str(value, "id", target)?.into();
+    let status = match value.get("status").and_then(Value::as_str) {
+        Some("queued") => VideoJobStatus::Queued,
+        Some("completed") => VideoJobStatus::Completed,
+        Some("failed") => VideoJobStatus::Failed,
+        _ => VideoJobStatus::InProgress,
+    };
+    let content_ref = match status {
+        VideoJobStatus::Completed => value
+            .get("gproxy_video_uri")
+            .and_then(Value::as_str)
+            .map(|uri| {
+                uri.split("/files/")
+                    .nth(1)
+                    .and_then(|rest| rest.split(":download").next())
+                    .unwrap_or(uri)
+                    .to_owned()
+            })
+            .or_else(|| Some(id.clone())),
+        _ => None,
+    };
+    Ok(VideoJob {
+        id,
+        status,
+        progress: value
+            .get("progress")
+            .and_then(Value::as_u64)
+            .map(|value| value as u32),
+        model: value
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        error: value.get("error").filter(|v| !v.is_null()).map(|error| {
+            crate::llm::ir::OperationFailure {
+                code: error
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("video_failed")
+                    .to_owned(),
+                message: error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("video generation failed")
+                    .to_owned(),
+                retryable: false,
+                details: Default::default(),
+            }
+        }),
+        content_ref,
+    })
 }

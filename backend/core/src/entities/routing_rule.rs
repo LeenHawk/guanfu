@@ -45,6 +45,16 @@ pub enum RoutingOperation {
     CreateTranslation,
     #[sea_orm(string_value = "compact_content")]
     CompactContent,
+    #[sea_orm(string_value = "create_video")]
+    CreateVideo,
+    #[sea_orm(string_value = "retrieve_video")]
+    RetrieveVideo,
+    #[sea_orm(string_value = "list_videos")]
+    ListVideos,
+    #[sea_orm(string_value = "delete_video")]
+    DeleteVideo,
+    #[sea_orm(string_value = "download_video_content")]
+    DownloadVideoContent,
     #[sea_orm(string_value = "create_conversation")]
     CreateConversation,
     #[sea_orm(string_value = "create_realtime_call")]
@@ -147,6 +157,11 @@ impl TryFrom<Operation> for RoutingOperation {
             Operation::CreateTranscription => Self::CreateTranscription,
             Operation::CreateTranslation => Self::CreateTranslation,
             Operation::CompactContent => Self::CompactContent,
+            Operation::CreateVideo => Self::CreateVideo,
+            Operation::RetrieveVideo => Self::RetrieveVideo,
+            Operation::ListVideos => Self::ListVideos,
+            Operation::DeleteVideo => Self::DeleteVideo,
+            Operation::DownloadVideoContent => Self::DownloadVideoContent,
             Operation::CreateConversation => Self::CreateConversation,
             Operation::CreateRealtimeCall => Self::CreateRealtimeCall,
             Operation::ConnectRealtime => Self::ConnectRealtime,
@@ -172,6 +187,11 @@ impl From<RoutingOperation> for Operation {
             RoutingOperation::CreateTranscription => Self::CreateTranscription,
             RoutingOperation::CreateTranslation => Self::CreateTranslation,
             RoutingOperation::CompactContent => Self::CompactContent,
+            RoutingOperation::CreateVideo => Self::CreateVideo,
+            RoutingOperation::RetrieveVideo => Self::RetrieveVideo,
+            RoutingOperation::ListVideos => Self::ListVideos,
+            RoutingOperation::DeleteVideo => Self::DeleteVideo,
+            RoutingOperation::DownloadVideoContent => Self::DownloadVideoContent,
             RoutingOperation::CreateConversation => Self::CreateConversation,
             RoutingOperation::CreateRealtimeCall => Self::CreateRealtimeCall,
             RoutingOperation::ConnectRealtime => Self::ConnectRealtime,

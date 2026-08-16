@@ -33,6 +33,8 @@ pub enum SemanticStreamMessage {
 pub enum SemanticLlmOutput {
     Complete(OperationResponse),
     Stream(SemanticEventStream),
+    /// Realtime WebSocket 双工连接;由壳层以专用通道暴露,不走通用请求/响应。
+    Realtime(crate::llm::realtime::RealtimeConnection),
 }
 
 /// Executes provider-neutral model operations through a channel routing table.
@@ -87,6 +89,40 @@ impl LlmService {
         let rotation = self.rotation.fetch_add(1, Ordering::Relaxed);
         let ordered = pool::order_credentials(&credentials, rotation, OffsetDateTime::now_utc());
         let mut last_error = None;
+
+        // Realtime 是 WebSocket 双工,不进 HTTP codec 通路;
+        // 路由矩阵仍是能力开关(要求 OpenAI 直通路由存在)。
+        if let OperationRequest::Platform(
+            crate::llm::ir::platform::PlatformRequest::ConnectRealtime(connect),
+        ) = &request
+        {
+            if !routes.iter().any(|route| {
+                matches!(
+                    route,
+                    routing::RouteDecision::TransformTo(target)
+                        if target.provider_family() == Provider::OpenAi
+                )
+            }) {
+                return Err(unsupported_route(channel_id, request.operation()));
+            }
+            if ordered.is_empty() {
+                return Err(CoreError::NoUsableCredential(channel.id));
+            }
+            for credential in &ordered {
+                let target = CallTarget {
+                    base_url: &channel.base_url,
+                    secret: &credential.secret,
+                };
+                match self.client.connect_realtime(&target, connect).await {
+                    Ok(connection) => {
+                        mark_success(db, credential).await?;
+                        return Ok(SemanticLlmOutput::Realtime(connection));
+                    }
+                    Err(error) => last_error = Some(error),
+                }
+            }
+            return Err(last_error.unwrap_or(CoreError::NoUsableCredential(channel.id)));
+        }
 
         for route in routes {
             let target_key = match route {

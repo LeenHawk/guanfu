@@ -3,98 +3,39 @@ use serde_json::Value;
 use super::*;
 use crate::llm::ir::generation::*;
 
+/// Responses SSE 事件 → GenerateEvent(迁移后仅服务 OpenAI Responses 目标,
+/// 事件即目标 wire 本身,无转换层)。
 pub(super) struct StreamDecoder {
-    source: OperationKey,
-    canonical: OperationKey,
-    converter: Option<gproxy_transform::dispatch::StreamConverter>,
+    target: OperationKey,
     finish_hint: Option<FinishReason>,
 }
 
 impl StreamDecoder {
-    pub(super) fn new(target: OperationKey, canonical: OperationKey) -> Result<Self, CoreError> {
-        let converter = if target == canonical {
-            None
-        } else {
-            let pair = resolve(target, canonical).map_err(transform_error)?;
-            Some(
-                gproxy_transform::dispatch::StreamConverter::new(
-                    pair,
-                    TransformContext::new(target, canonical),
-                )
-                .map_err(transform_error)?,
-            )
-        };
-        Ok(Self {
-            source: target,
-            canonical,
-            converter,
+    pub(super) fn new(target: OperationKey) -> Self {
+        Self {
+            target,
             finish_hint: None,
-        })
+        }
     }
 
     pub(super) fn push(
         &mut self,
         frame: crate::llm::wire::JsonSseFrame,
     ) -> Result<Vec<OperationEvent>, CoreError> {
-        let values = match (frame.data, self.converter.as_mut()) {
-            (JsonSseData::Done, None) => Vec::new(),
-            (JsonSseData::Done, Some(converter)) => converter
-                .finish_detailed()
-                .map_err(transform_error)
-                .and_then(strict_stream_output)?,
-            (JsonSseData::Json(body), None) => vec![body.decode::<Value>()?],
-            (JsonSseData::Json(body), Some(converter)) => converter
-                .push_detailed(
-                    std::str::from_utf8(body.as_bytes())
-                        .map_err(|error| CoreError::Transform(error.to_string()))?,
-                )
-                .map_err(transform_error)
-                .and_then(strict_stream_output)?,
+        let JsonSseData::Json(body) = frame.data else {
+            return Ok(Vec::new());
         };
-        values
-            .into_iter()
-            .filter_map(|value| {
-                match decode_stream_event(
-                    &value,
-                    self.source,
-                    self.canonical,
-                    &mut self.finish_hint,
-                ) {
-                    Ok(Some(event)) => Some(Ok(OperationEvent::Generate(event))),
-                    Ok(None) => None,
-                    Err(error) => Some(Err(error)),
-                }
-            })
-            .collect()
+        let value: Value = body.decode()?;
+        match decode_stream_event(&value, self.target, &mut self.finish_hint) {
+            Ok(Some(event)) => Ok(vec![OperationEvent::Generate(event)]),
+            Ok(None) => Ok(Vec::new()),
+            Err(error) => Err(error),
+        }
     }
-}
-
-fn strict_stream_output(
-    output: gproxy_transform::TransformOutput<Vec<gproxy_transform::dispatch::StreamEventOut>>,
-) -> Result<Vec<Value>, CoreError> {
-    if !output.diagnostics.is_empty() {
-        return Err(CoreError::Transform(format!(
-            "semantic loss while decoding stream: {:?}",
-            output.diagnostics
-        )));
-    }
-    output
-        .value
-        .into_iter()
-        .map(|event| match event {
-            gproxy_transform::dispatch::StreamEventOut::Responses(event) => {
-                serde_json::to_value(event).map_err(CoreError::from)
-            }
-            gproxy_transform::dispatch::StreamEventOut::Encoded { data, .. } => {
-                serde_json::from_str(&data).map_err(CoreError::from)
-            }
-        })
-        .collect()
 }
 
 fn decode_stream_event(
     value: &Value,
-    source: OperationKey,
     target: OperationKey,
     finish_hint: &mut Option<FinishReason>,
 ) -> Result<Option<GenerateEvent>, CoreError> {
@@ -249,7 +190,7 @@ fn decode_stream_event(
             }
             GenerateEvent::OutputFinished(OutputFinished {
                 output_index: u32_field(value, "output_index")?,
-                item: super::response::decode_output_item(item, source)?,
+                item: super::response::decode_output_item(item, target)?,
             })
         }
         "response.completed" => GenerateEvent::Finished(GenerationFinished {
@@ -352,8 +293,15 @@ fn output_kind(kind: &str) -> Result<OutputKind, CoreError> {
     Ok(match kind {
         "message" => OutputKind::Message,
         "reasoning" => OutputKind::Reasoning,
-        "image_generation_call" => OutputKind::Image,
+        "compaction" => OutputKind::Compaction,
+        "mcp_approval_request" => OutputKind::McpApprovalRequest,
         "audio" => OutputKind::Audio,
+        "web_search_call"
+        | "file_search_call"
+        | "code_interpreter_call"
+        | "image_generation_call"
+        | "mcp_call"
+        | "mcp_list_tools" => OutputKind::ToolExecution,
         value if value.ends_with("call") => OutputKind::ToolCall,
         other => return Err(unmodeled(other, Operation::StreamGenerateContent)),
     })

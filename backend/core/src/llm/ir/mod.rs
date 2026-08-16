@@ -11,8 +11,10 @@ pub mod images;
 pub mod models;
 mod operation;
 pub mod platform;
+pub mod realtime;
 pub mod search;
 pub mod tokens;
+pub mod video;
 
 pub use common::*;
 pub use operation::*;

@@ -39,20 +39,6 @@ pub struct Model {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub created_at: Option<i64>,
-    pub capabilities: Option<Vec<ModelCapability>>,
     pub context_limit: Option<u64>,
     pub output_limit: Option<u64>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelCapability {
-    GenerateText,
-    GenerateImage,
-    ImageInput,
-    AudioInput,
-    AudioOutput,
-    Embeddings,
-    Tools,
-    Reasoning,
 }

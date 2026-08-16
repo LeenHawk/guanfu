@@ -90,19 +90,20 @@ pub(in crate::llm::codec) fn decode_output_item(
             name: required_str(value, "name")?.into(),
             input: required_str(value, "input")?.into(),
         })),
-        "web_search_call" | "file_search_call" => {
-            let call = HostedToolCall {
-                id: output_id,
-                call_id: crate::llm::ir::ToolCallId(id),
-                name: kind.trim_end_matches("_call").into(),
-                input: value.clone(),
-            };
-            OutputItem::ToolCall(if kind == "web_search_call" {
-                ToolCall::WebSearch(call)
-            } else {
-                ToolCall::FileSearch(call)
-            })
+        "web_search_call"
+        | "file_search_call"
+        | "code_interpreter_call"
+        | "image_generation_call"
+        | "mcp_call"
+        | "mcp_list_tools" => {
+            OutputItem::ToolExecution(decode_tool_execution(value, output_id, &id))
         }
+        "mcp_approval_request" => OutputItem::McpApprovalRequest(McpApprovalRequest {
+            id: output_id,
+            server_label: required_str(value, "server_label")?.into(),
+            name: required_str(value, "name")?.into(),
+            arguments: serde_json::from_str(required_str(value, "arguments")?)?,
+        }),
         "computer_call" => OutputItem::ToolCall(ToolCall::ComputerUse(ComputerActionCall {
             id: output_id,
             call_id: crate::llm::ir::ToolCallId(required_str(value, "call_id")?.into()),
@@ -111,13 +112,6 @@ pub(in crate::llm::codec) fn decode_output_item(
                 .cloned()
                 .ok_or_else(|| invalid_payload("computer action is missing"))?,
         })),
-        "code_interpreter_call" => {
-            OutputItem::ToolCall(ToolCall::CodeExecution(CodeExecutionCall {
-                id: output_id,
-                call_id: crate::llm::ir::ToolCallId(id),
-                input: value.clone(),
-            }))
-        }
         "shell_call" | "local_shell_call" => OutputItem::ToolCall(ToolCall::Shell(ShellCall {
             id: output_id,
             call_id: crate::llm::ir::ToolCallId(
@@ -140,20 +134,6 @@ pub(in crate::llm::codec) fn decode_output_item(
             ),
             input: value.clone(),
         })),
-        "image_generation_call" => {
-            OutputItem::ToolCall(ToolCall::ImageGeneration(ImageGenerationCall {
-                id: output_id,
-                call_id: crate::llm::ir::ToolCallId(id),
-                input: value.clone(),
-            }))
-        }
-        "mcp_call" => OutputItem::ToolCall(ToolCall::Mcp(McpCall {
-            id: output_id,
-            call_id: crate::llm::ir::ToolCallId(id),
-            server_label: required_str(value, "server_label")?.into(),
-            name: required_str(value, "name")?.into(),
-            arguments: serde_json::from_str(required_str(value, "arguments")?)?,
-        })),
         "tool_search_call" => OutputItem::ToolCall(ToolCall::ToolSearch(ToolSearchCall {
             id: output_id,
             call_id: crate::llm::ir::ToolCallId(
@@ -167,6 +147,35 @@ pub(in crate::llm::codec) fn decode_output_item(
         })),
         other => return Err(unmodeled(other, Operation::GenerateContent)),
     })
+}
+
+/// 服务端执行的托管工具 item：状态从 `status` 读取，原始 item 保留在 output。
+fn decode_tool_execution(
+    value: &Value,
+    id: crate::llm::ir::OutputId,
+    raw_id: &str,
+) -> ToolExecution {
+    let state = match value.get("status").and_then(Value::as_str) {
+        Some("completed") => ToolExecutionState::Completed,
+        Some("failed") | Some("incomplete") => ToolExecutionState::Failed,
+        _ => ToolExecutionState::Running,
+    };
+    ToolExecution {
+        id,
+        call_id: crate::llm::ir::ToolCallId(
+            value
+                .get("call_id")
+                .and_then(Value::as_str)
+                .unwrap_or(raw_id)
+                .into(),
+        ),
+        state,
+        output: Some(value.clone()),
+        error: value
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    }
 }
 
 fn decode_reasoning(

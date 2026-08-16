@@ -1,142 +1,48 @@
-use gproxy_protocol::{ContentGenerationKind, OperationKey, OperationKind};
+use gproxy_protocol::{ContentGenerationKind, OperationKey};
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
 use crate::llm::ir::generation::{
     GenerateRequest, GenerationProtocol, InputItem, ProtocolOptions, ReasoningPart,
 };
 use crate::CoreError;
 
+/// OpenAI Responses 专用:采样直写 + reasoning 校验 + merge patch +
+/// encrypted_content include。其余协议在各自 codec 内直写参数。
 pub(super) fn apply(
     request: &GenerateRequest,
     target: OperationKey,
     body: &mut Value,
 ) -> Result<(), CoreError> {
-    let kind = content_kind(target)?;
     let body = body
         .as_object_mut()
-        .ok_or_else(|| invalid_body(target, "generation request body is not an object"))?;
-    apply_sampling(request, kind, body);
-    apply_reasoning(request, target, kind, body)?;
-    apply_protocol_options(&request.protocol_options, kind, body);
-    ensure_reasoning_continuation(request, kind, body);
-    Ok(())
-}
-
-fn apply_sampling(
-    request: &GenerateRequest,
-    kind: ContentGenerationKind,
-    body: &mut Map<String, Value>,
-) {
-    let sampling = &request.sampling;
-    match kind {
-        ContentGenerationKind::OpenAiResponses
-        | ContentGenerationKind::OpenAiResponsesWebSocket => {
-            insert_option(body, "temperature", sampling.temperature);
-            insert_option(body, "top_p", sampling.top_p);
-        }
-        ContentGenerationKind::OpenAiChatCompletions => {
-            insert_option(body, "temperature", sampling.temperature);
-            insert_option(body, "top_p", sampling.top_p);
-            insert_option(body, "seed", sampling.seed);
-            insert_option(body, "frequency_penalty", sampling.frequency_penalty);
-            insert_option(body, "presence_penalty", sampling.presence_penalty);
-            insert_stop(body, "stop", &sampling.stop);
-        }
-        ContentGenerationKind::ClaudeMessages => {
-            insert_option(body, "temperature", sampling.temperature);
-            insert_option(body, "top_p", sampling.top_p);
-            insert_option(body, "top_k", sampling.top_k);
-            insert_stop(body, "stop_sequences", &sampling.stop);
-        }
-        ContentGenerationKind::GeminiGenerateContent => {
-            let config = object_field(body, "generationConfig");
-            insert_option(config, "temperature", sampling.temperature);
-            insert_option(config, "topP", sampling.top_p);
-            insert_option(config, "topK", sampling.top_k);
-            insert_option(config, "seed", sampling.seed);
-            insert_option(config, "frequencyPenalty", sampling.frequency_penalty);
-            insert_option(config, "presencePenalty", sampling.presence_penalty);
-            insert_stop(config, "stopSequences", &sampling.stop);
-        }
-        _ => {}
-    }
-}
-
-fn apply_reasoning(
-    request: &GenerateRequest,
-    target: OperationKey,
-    kind: ContentGenerationKind,
-    body: &mut Map<String, Value>,
-) -> Result<(), CoreError> {
-    let Some(reasoning) = &request.reasoning else {
-        return Ok(());
-    };
-    let mut incompatible = Vec::new();
-    match kind {
-        ContentGenerationKind::OpenAiResponses
-        | ContentGenerationKind::OpenAiResponsesWebSocket => {
-            if reasoning.budget_tokens.is_some() {
-                incompatible.push("reasoning.budget_tokens".into());
-            }
-        }
-        ContentGenerationKind::OpenAiChatCompletions => {
-            if reasoning.budget_tokens.is_some() {
-                incompatible.push("reasoning.budget_tokens".into());
-            }
-            if reasoning.summary.is_some() {
-                incompatible.push("reasoning.summary".into());
-            }
-        }
-        ContentGenerationKind::ClaudeMessages => {
-            if reasoning.summary.is_some_and(|summary| {
-                summary != crate::llm::ir::generation::ReasoningSummary::Auto
-            }) {
-                incompatible.push("reasoning.summary".into());
-            }
-        }
-        ContentGenerationKind::GeminiGenerateContent if reasoning.summary.is_some() => {
-            incompatible.push("reasoning.summary".into());
-        }
-        _ => {}
-    }
-    if !incompatible.is_empty() {
+        .ok_or_else(|| CoreError::InvalidProviderPayload {
+            target,
+            reason: "generation request body is not an object".into(),
+        })?;
+    insert_option(body, "temperature", request.sampling.temperature);
+    insert_option(body, "top_p", request.sampling.top_p);
+    if request
+        .reasoning
+        .as_ref()
+        .is_some_and(|reasoning| reasoning.budget_tokens.is_some())
+    {
         return Err(CoreError::IncompatibleRoute {
             target,
-            fields: incompatible,
+            fields: vec!["reasoning.budget_tokens".into()],
         });
     }
-    match kind {
-        ContentGenerationKind::ClaudeMessages => {
-            if let Some(budget_tokens) = reasoning.budget_tokens {
-                body.insert(
-                    "thinking".into(),
-                    json!({"type":"enabled","budget_tokens":budget_tokens}),
-                );
-            }
-            if reasoning.summary.is_some() {
-                let thinking = object_field(body, "thinking");
-                thinking
-                    .entry("type")
-                    .or_insert_with(|| Value::String("adaptive".into()));
-                thinking.insert("display".into(), Value::String("summarized".into()));
-            }
-        }
-        ContentGenerationKind::GeminiGenerateContent if reasoning.budget_tokens.is_some() => {
-            let config = object_field(body, "generationConfig");
-            let thinking = object_field(config, "thinkingConfig");
-            insert_option(thinking, "thinkingBudget", reasoning.budget_tokens);
-        }
-        _ => {}
-    }
+    apply_protocol_options(
+        &request.protocol_options,
+        ContentGenerationKind::OpenAiResponses,
+        body,
+    );
+    ensure_reasoning_continuation(request, body);
     Ok(())
 }
 
-fn ensure_reasoning_continuation(
-    request: &GenerateRequest,
-    kind: ContentGenerationKind,
-    body: &mut Map<String, Value>,
-) {
+/// 请求 reasoning 或回放延续时补 include=["reasoning.encrypted_content"]。
+fn ensure_reasoning_continuation(request: &GenerateRequest, body: &mut Map<String, Value>) {
     let has_continuation = request.input.iter().any(|item| {
         let InputItem::Reasoning { reasoning } = item else {
             return false;
@@ -151,13 +57,7 @@ fn ensure_reasoning_continuation(
             )
         })
     });
-    if (request.reasoning.is_none() && !has_continuation)
-        || !matches!(
-            kind,
-            ContentGenerationKind::OpenAiResponses
-                | ContentGenerationKind::OpenAiResponsesWebSocket
-        )
-    {
+    if request.reasoning.is_none() && !has_continuation {
         return;
     }
     if !body.get("include").is_some_and(Value::is_array) {
@@ -175,7 +75,8 @@ fn ensure_reasoning_continuation(
     }
 }
 
-fn apply_protocol_options(
+/// 各协议 merge patch(含保护路径),被四个原生 codec 复用。
+pub(super) fn apply_protocol_options(
     options: &[ProtocolOptions],
     kind: ContentGenerationKind,
     body: &mut Map<String, Value>,
@@ -200,9 +101,6 @@ fn protocol_matches(protocol: GenerationProtocol, kind: ContentGenerationKind) -
         (
             GenerationProtocol::OpenAiResponses,
             ContentGenerationKind::OpenAiResponses
-        ) | (
-            GenerationProtocol::OpenAiResponsesWebSocket,
-            ContentGenerationKind::OpenAiResponsesWebSocket
         ) | (
             GenerationProtocol::OpenAiChatCompletions,
             ContentGenerationKind::OpenAiChatCompletions
@@ -276,8 +174,7 @@ fn protected_path(kind: ContentGenerationKind, path: &[String]) -> bool {
         return false;
     }
     match kind {
-        ContentGenerationKind::OpenAiResponses
-        | ContentGenerationKind::OpenAiResponsesWebSocket => matches!(
+        ContentGenerationKind::OpenAiResponses => matches!(
             (path[0].as_str(), path[1].as_str()),
             ("text", "format") | ("reasoning", "effort" | "summary")
         ),
@@ -305,8 +202,7 @@ fn has_protected_descendant(kind: ContentGenerationKind, path: &[String]) -> boo
         return false;
     }
     match kind {
-        ContentGenerationKind::OpenAiResponses
-        | ContentGenerationKind::OpenAiResponsesWebSocket => {
+        ContentGenerationKind::OpenAiResponses => {
             matches!(path[0].as_str(), "text" | "reasoning")
         }
         ContentGenerationKind::ClaudeMessages => path[0] == "output_config",
@@ -324,37 +220,11 @@ fn object_field<'a>(body: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<
         .expect("object field was inserted")
 }
 
-fn insert_stop(body: &mut Map<String, Value>, key: &str, stop: &[String]) {
-    if !stop.is_empty() {
-        body.insert(
-            key.into(),
-            Value::Array(stop.iter().cloned().map(Value::String).collect()),
-        );
-    }
-}
-
 fn insert_option<T: Serialize>(body: &mut Map<String, Value>, key: &str, value: Option<T>) {
     if let Some(value) = value {
         body.insert(
             key.into(),
             serde_json::to_value(value).expect("generation option is serializable"),
         );
-    }
-}
-
-fn content_kind(target: OperationKey) -> Result<ContentGenerationKind, CoreError> {
-    match target.kind() {
-        OperationKind::ContentGeneration(kind) => Ok(kind),
-        _ => Err(invalid_body(
-            target,
-            "target is not a content generation kind",
-        )),
-    }
-}
-
-fn invalid_body(target: OperationKey, reason: &str) -> CoreError {
-    CoreError::InvalidProviderPayload {
-        target,
-        reason: reason.into(),
     }
 }

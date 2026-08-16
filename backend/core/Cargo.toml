@@ -12,9 +12,9 @@ sea-orm = { version = "2", default-features = false, features = [
   "schema-sync",
   "with-time",
 ] }
-gproxy-protocol = "2"
-gproxy-transform = "2"
-gproxy-tokenize = { version = "2", features = ["tiktoken"] }
+gproxy-protocol = "2.8"
+gproxy-transform = "2.8"
+gproxy-tokenize = { version = "2.8", features = ["tiktoken"] }
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
   "multipart",
@@ -30,10 +30,12 @@ time = { version = "0.3", features = ["serde"] }
 bytes = { version = "1", features = ["serde"] }
 base64 = "0.22"
 http = "1"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 eventsource-stream = "0.2"
 tracing = "0.1"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tokio = { version = "1", default-features = false, features = ["time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

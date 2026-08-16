@@ -1,3 +1,16 @@
+mod chat;
+mod chat_content;
+mod chat_response;
+mod chat_stream;
+mod chat_tools;
+mod claude;
+mod claude_response;
+mod claude_stream;
+mod claude_tools;
+mod gemini;
+mod gemini_response;
+mod gemini_stream;
+mod gemini_tools;
 mod options;
 pub(in crate::llm::codec) mod request;
 pub(in crate::llm::codec) mod response;
@@ -5,9 +18,7 @@ mod stream;
 #[cfg(test)]
 mod tests;
 
-use bytes::Bytes;
 use gproxy_protocol::{ContentGenerationKind, Operation, OperationKey, OperationKind};
-use gproxy_transform::{dispatch, resolve, TransformContext};
 use http::HeaderMap;
 use serde_json::{Map, Value};
 
@@ -20,15 +31,28 @@ use crate::llm::wire::{
 };
 use crate::CoreError;
 
-const CANONICAL_KIND: ContentGenerationKind = ContentGenerationKind::OpenAiResponses;
-
 pub fn encode(request: &GenerateRequest, target: OperationKey) -> Result<WireRequest, CoreError> {
-    validate_reasoning_continuations(request, target)?;
-    let source = OperationKey::content_generation(request.operation(), CANONICAL_KIND);
-    let canonical = JsonBody::encode(&request::encode_request(request)?)?;
-    let transformed = transform_request(source, target, canonical)?;
-    let mut value = transformed.decode()?;
-    options::apply(request, target, &mut value)?;
+    let kind = generation_kind(target)?;
+    validate_reasoning_continuations(request, target, kind)?;
+    request::validate_target_tools(request, target)?;
+    // 全部生成目标走 IR ↔ typed wire 直达编码,gproxy-transform 不再参与。
+    let value = match kind {
+        ContentGenerationKind::ClaudeMessages => claude::encode_request(request, target)?,
+        ContentGenerationKind::GeminiGenerateContent => gemini::encode_request(request, target)?,
+        ContentGenerationKind::OpenAiChatCompletions => chat::encode_request(request, target)?,
+        ContentGenerationKind::OpenAiResponses => {
+            let mut value = request::encode_request(request)?;
+            options::apply(request, target, &mut value)?;
+            value
+        }
+        // guanfu 的生成客户端走 HTTP,WS 帧无法在此通路传输;realtime 另有专用通路。
+        ContentGenerationKind::OpenAiResponsesWebSocket => {
+            return Err(CoreError::UnsupportedRouteImplementation {
+                implementation: "websocket generation transport",
+            })
+        }
+        _ => return Err(unsupported_kind(target)),
+    };
     let body = JsonBody::encode(&value)?;
     let endpoint = gproxy_protocol::endpoint::request_target(
         target,
@@ -57,13 +81,8 @@ pub fn encode(request: &GenerateRequest, target: OperationKey) -> Result<WireReq
 fn validate_reasoning_continuations(
     request: &GenerateRequest,
     target: OperationKey,
+    kind: ContentGenerationKind,
 ) -> Result<(), CoreError> {
-    let OperationKind::ContentGeneration(kind) = target.kind() else {
-        return Err(CoreError::InvalidProviderPayload {
-            target,
-            reason: "target is not a content generation kind".into(),
-        });
-    };
     let compatible = request.input.iter().all(|item| {
         let InputItem::Reasoning { reasoning } = item else {
             return true;
@@ -112,82 +131,90 @@ pub fn decode(
     target: OperationKey,
     response: WireResponse,
 ) -> Result<DecodedResponse, CoreError> {
-    let canonical = OperationKey::content_generation(request.operation(), CANONICAL_KIND);
+    let kind = generation_kind(target)?;
     match response {
         WireResponse::Json(response) if request.mode == GenerateMode::Complete => {
-            let body = transform_response(target, canonical, response.body)?;
+            let decoded = match kind {
+                ContentGenerationKind::ClaudeMessages => {
+                    claude_response::decode_complete(&response.body, target)?
+                }
+                ContentGenerationKind::GeminiGenerateContent => {
+                    gemini_response::decode_complete(&response.body)?
+                }
+                ContentGenerationKind::OpenAiChatCompletions => {
+                    chat_response::decode_complete(&response.body, target)?
+                }
+                ContentGenerationKind::OpenAiResponses => {
+                    response::decode_complete(&response.body, target)?
+                }
+                ContentGenerationKind::OpenAiResponsesWebSocket => {
+                    return Err(CoreError::UnsupportedRouteImplementation {
+                        implementation: "websocket generation transport",
+                    })
+                }
+                _ => return Err(unsupported_kind(target)),
+            };
             Ok(DecodedResponse::Complete(
-                crate::llm::ir::OperationResponse::Generate(response::decode_complete(
-                    &body, target,
-                )?),
+                crate::llm::ir::OperationResponse::Generate(decoded),
             ))
         }
-        WireResponse::JsonSse(response) if request.mode == GenerateMode::Stream => {
-            let mut decoder = stream::StreamDecoder::new(target, canonical)?;
-            Ok(DecodedResponse::Stream(super::map_sse(
-                response.stream,
-                move |frame| decoder.push(frame),
-            )))
-        }
+        WireResponse::JsonSse(response) if request.mode == GenerateMode::Stream => match kind {
+            ContentGenerationKind::ClaudeMessages => {
+                let mut decoder = claude_stream::StreamDecoder::new(target);
+                Ok(DecodedResponse::Stream(super::map_sse(
+                    response.stream,
+                    move |frame| decoder.push(frame),
+                )))
+            }
+            ContentGenerationKind::GeminiGenerateContent => {
+                let mut decoder = gemini_stream::StreamDecoder::default();
+                Ok(DecodedResponse::Stream(super::map_sse(
+                    response.stream,
+                    move |frame| decoder.push(frame),
+                )))
+            }
+            ContentGenerationKind::OpenAiChatCompletions => {
+                let mut decoder = chat_stream::StreamDecoder::new(target);
+                Ok(DecodedResponse::Stream(super::map_sse(
+                    response.stream,
+                    move |frame| decoder.push(frame),
+                )))
+            }
+            ContentGenerationKind::OpenAiResponses => {
+                let mut decoder = stream::StreamDecoder::new(target);
+                Ok(DecodedResponse::Stream(super::map_sse(
+                    response.stream,
+                    move |frame| decoder.push(frame),
+                )))
+            }
+            ContentGenerationKind::OpenAiResponsesWebSocket => {
+                Err(CoreError::UnsupportedRouteImplementation {
+                    implementation: "websocket generation transport",
+                })
+            }
+            _ => Err(unsupported_kind(target)),
+        },
         _ => Err(CoreError::Endpoint(
             "generation response mode does not match request".to_owned(),
         )),
     }
 }
 
-impl GenerateRequest {
-    fn operation(&self) -> Operation {
-        match self.mode {
-            GenerateMode::Complete => Operation::GenerateContent,
-            GenerateMode::Stream => Operation::StreamGenerateContent,
-        }
-    }
-}
-
-fn transform_request(
-    source: OperationKey,
-    target: OperationKey,
-    body: JsonBody,
-) -> Result<JsonBody, CoreError> {
-    if source == target {
-        return Ok(body);
-    }
-    let pair = resolve(source, target).map_err(transform_error)?;
-    let ctx = TransformContext::new(source, target);
-    let output =
-        dispatch::request_bytes_detailed(pair, &ctx, body.as_bytes()).map_err(transform_error)?;
-    if !output.diagnostics.is_empty() {
-        return Err(CoreError::IncompatibleRoute {
+fn generation_kind(target: OperationKey) -> Result<ContentGenerationKind, CoreError> {
+    match target.kind() {
+        OperationKind::ContentGeneration(kind) => Ok(kind),
+        _ => Err(CoreError::InvalidProviderPayload {
             target,
-            fields: output
-                .diagnostics
-                .into_iter()
-                .map(|diagnostic| diagnostic.field)
-                .collect(),
-        });
+            reason: "target is not a content generation kind".into(),
+        }),
     }
-    JsonBody::from_bytes(Bytes::from(output.value))
 }
 
-fn transform_response(
-    source: OperationKey,
-    target: OperationKey,
-    body: JsonBody,
-) -> Result<JsonBody, CoreError> {
-    if source == target {
-        return Ok(body);
+fn unsupported_kind(target: OperationKey) -> CoreError {
+    CoreError::InvalidProviderPayload {
+        target,
+        reason: "unsupported content generation kind".into(),
     }
-    let pair = resolve(source, target).map_err(transform_error)?;
-    let ctx = TransformContext::new(source, target);
-    let output =
-        dispatch::response_bytes_detailed(pair, &ctx, body.as_bytes()).map_err(transform_error)?;
-    if !output.diagnostics.is_empty() {
-        return Err(CoreError::Transform(format!(
-            "semantic loss while decoding response: {:?}",
-            output.diagnostics
-        )));
-    }
-    JsonBody::from_bytes(Bytes::from(output.value))
 }
 
 fn u32_field(value: &Value, key: &str) -> Result<u32, CoreError> {
@@ -215,9 +242,13 @@ fn pointer_str<'a>(value: &'a Value, pointer: &str) -> Result<&'a str, CoreError
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_payload(&format!("missing or invalid string {pointer}")))
 }
+/// Responses codec(request.rs/response.rs/stream.rs)共用的错误构造。
 fn invalid_payload(reason: &str) -> CoreError {
     CoreError::InvalidProviderPayload {
-        target: OperationKey::content_generation(Operation::GenerateContent, CANONICAL_KIND),
+        target: OperationKey::content_generation(
+            Operation::GenerateContent,
+            ContentGenerationKind::OpenAiResponses,
+        ),
         reason: reason.to_owned(),
     }
 }
@@ -226,12 +257,9 @@ fn kind_key(value: Option<&str>) -> &str {
 }
 fn unmodeled(event: &str, operation: Operation) -> CoreError {
     CoreError::UnmodeledProviderEvent {
-        target: OperationKey::content_generation(operation, CANONICAL_KIND),
+        target: OperationKey::content_generation(operation, ContentGenerationKind::OpenAiResponses),
         event: event.into(),
     }
-}
-fn transform_error(error: gproxy_transform::TransformError) -> CoreError {
-    CoreError::Transform(format!("{error:?}"))
 }
 fn parse_query(query: &str) -> Result<Vec<QueryParam>, CoreError> {
     query

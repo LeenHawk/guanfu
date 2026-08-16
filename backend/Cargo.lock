@@ -810,6 +810,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-oid"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
 name = "const-random"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1093,6 +1099,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-encoding"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+
+[[package]]
 name = "dbus"
 version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1193,6 +1205,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
+ "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -1909,9 +1922,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-protocol"
-version = "2.6.4"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26de0e84d335f751b465bf73a4a749535af241da6bc929a881defb1e8b745b06"
+checksum = "c9560528314d40a1ec10b6ca6a87af936a8ba06ce5e83b3cb0ef909dc0a886b4"
 dependencies = [
  "gproxy-protocol-macros",
  "http",
@@ -1921,9 +1934,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-protocol-macros"
-version = "2.6.4"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c459a08906e14c29946a6e7314f89ed2f6ba9be1c78c94b331b5ce0d627fd3"
+checksum = "ad7a9df2db41b06523081bb7b47050d54930655d9b534a13dfb838993c8fae03"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1932,9 +1945,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-tokenize"
-version = "2.6.4"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d159bd8c9e3912725924686ed8efd49ab03b5e73c5d4bf4b592baeff793f734"
+checksum = "e04b9b49d6e1d92a84c6488ffe356b2aee44e3f0ab861058377778910001d0bf"
 dependencies = [
  "serde_json",
  "tiktoken-rs",
@@ -1942,9 +1955,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-transform"
-version = "2.6.4"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46465837820eee563d3d3d1fdf3a0d200ed0d522eafbf333f0dfaaaf730dc6f6"
+checksum = "ddf95fd538f3f9e5dda69bdfe99daedad650dfa27ad0fe39628426e67c2d08b1"
 dependencies = [
  "blake3",
  "gproxy-protocol",
@@ -2042,6 +2055,7 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "ts-rs",
 ]
@@ -4564,7 +4578,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
- "webpki-roots",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -5344,6 +5358,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
+dependencies = [
+ "futures-util",
+ "log",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tungstenite",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5633,6 +5663,24 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "termcolor",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand",
+ "rustls",
+ "rustls-pki-types",
+ "sha1",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -6022,6 +6070,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]

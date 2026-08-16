@@ -50,21 +50,6 @@ fn metadata() -> ResponseMetadata {
 }
 
 #[test]
-fn encodes_semantic_request_as_claude_messages() {
-    let target = OperationKey::content_generation(
-        Operation::GenerateContent,
-        ContentGenerationKind::ClaudeMessages,
-    );
-    let encoded = encode(&request(GenerateMode::Complete), target).unwrap();
-    let RequestBody::Json(body) = encoded.body else {
-        panic!("expected JSON body")
-    };
-    let value: Value = body.decode().unwrap();
-    assert_eq!(value["model"], "claude-test");
-    assert_eq!(value["messages"][0]["content"][0]["text"], "hi");
-}
-
-#[test]
 fn encodes_sampling_and_historical_system_for_openai_chat() {
     let mut request = request(GenerateMode::Complete);
     request.input.push(InputItem::Message {
@@ -195,6 +180,21 @@ fn requests_and_replays_claude_reasoning_continuation() {
         budget_tokens: Some(2048),
         summary: Some(ReasoningSummary::Auto),
     });
+    request.tools = vec![
+        ToolDefinition::WebSearch(WebSearchTool {
+            max_uses: Some(3),
+            blocked_domains: vec!["b.example".into()],
+            ..Default::default()
+        }),
+        ToolDefinition::WebFetch(WebFetchTool {
+            max_uses: Some(5),
+            ..Default::default()
+        }),
+        ToolDefinition::TextEditor(TextEditorTool {
+            max_characters: Some(10_000),
+        }),
+        ToolDefinition::Memory,
+    ];
     let claude = OperationKey::content_generation(
         Operation::GenerateContent,
         ContentGenerationKind::ClaudeMessages,
@@ -204,8 +204,36 @@ fn requests_and_replays_claude_reasoning_continuation() {
         panic!("expected JSON body")
     };
     let value: Value = body.decode().unwrap();
+    assert_eq!(value["model"], "claude-test");
     assert_eq!(value["messages"][0]["content"][0]["thinking"], "hidden");
     assert_eq!(value["messages"][0]["content"][0]["signature"], "signature");
+    assert_eq!(value["messages"][1]["content"][0]["text"], "hi");
+    let tools = value["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|tool| tool["name"] == "web_search"
+        && tool["max_uses"] == 3
+        && tool["blocked_domains"] == json!(["b.example"])));
+    assert!(tools
+        .iter()
+        .any(|tool| tool["name"] == "web_fetch" && tool["max_uses"] == 5));
+    assert!(tools
+        .iter()
+        .any(|tool| tool["type"] == "text_editor_20250728" && tool["max_characters"] == 10_000));
+    assert!(tools.iter().any(|tool| tool["type"] == "memory_20250818"));
+
+    let openai = OperationKey::content_generation(
+        Operation::GenerateContent,
+        ContentGenerationKind::OpenAiResponses,
+    );
+    let mut portable = request.clone();
+    portable.input.remove(0);
+    assert!(matches!(
+        encode(&portable, openai),
+        Err(crate::CoreError::IncompatibleRoute { fields, .. })
+            if fields.contains(&"tools[].web_fetch".to_owned())
+                && fields.contains(&"tools[].web_search.max_uses".to_owned())
+                && fields.contains(&"tools[].text_editor.max_characters".to_owned())
+                && fields.contains(&"tools[].memory".to_owned())
+    ));
 
     let gemini = OperationKey::content_generation(
         Operation::GenerateContent,
@@ -283,6 +311,64 @@ fn decodes_claude_complete_response_into_semantic_output() {
 }
 
 #[test]
+fn decodes_gemini_complete_response_into_semantic_output() {
+    let target = OperationKey::content_generation(
+        Operation::GenerateContent,
+        ContentGenerationKind::GeminiGenerateContent,
+    );
+    let body = JsonBody::encode(&json!({
+        "responseId":"gen_1","modelVersion":"gemini-test",
+        "candidates":[{
+            "index":0,
+            "content":{"role":"model","parts":[
+                {"text":"hidden","thought":true,"thoughtSignature":"signature"},
+                {"text":"hello"}
+            ]},
+            "finishReason":"STOP"
+        }],
+        "usageMetadata":{
+            "promptTokenCount":4,"candidatesTokenCount":2,"thoughtsTokenCount":3,
+            "cachedContentTokenCount":1,"totalTokenCount":9
+        }
+    }))
+    .unwrap();
+    let decoded = decode(
+        &request(GenerateMode::Complete),
+        target,
+        WireResponse::Json(JsonResponse {
+            metadata: metadata(),
+            body,
+        }),
+    )
+    .unwrap();
+    let DecodedResponse::Complete(OperationResponse::Generate(response)) = decoded else {
+        panic!("expected complete generation response")
+    };
+    assert!(matches!(
+        &response.output[0],
+        OutputItem::Reasoning(ReasoningOutput { parts, .. })
+            if matches!(
+                &parts[0],
+                ReasoningPart::Text {
+                    text,
+                    continuation: Some(ReasoningContinuation::GeminiThoughtSignature { signature })
+                } if text == "hidden" && signature == "signature"
+            )
+    ));
+    assert!(matches!(
+        &response.output[1],
+        OutputItem::Message(message)
+            if matches!(&message.content[0], OutputContent::Text { text, .. } if text == "hello")
+    ));
+    assert_eq!(response.finish, FinishReason::Stop);
+    let usage = response.usage.unwrap();
+    assert_eq!(usage.input_tokens, 4);
+    assert_eq!(usage.output_tokens, 5);
+    assert_eq!(usage.reasoning_tokens, 3);
+    assert_eq!(usage.cached_input_tokens, 1);
+}
+
+#[test]
 fn decodes_tool_call_and_failed_complete_lifecycle() {
     let claude = OperationKey::content_generation(
         Operation::GenerateContent,
@@ -329,60 +415,134 @@ fn decodes_tool_call_and_failed_complete_lifecycle() {
         Err(crate::CoreError::OperationFailed(failure))
             if failure.code == "server_error" && failure.retryable
     ));
+
+    let hosted_body = JsonBody::encode(&json!({
+        "id":"resp_2","model":"test","status":"completed",
+        "output":[
+            {"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"q"}},
+            {"type":"mcp_approval_request","id":"mcpr_1","server_label":"docs","name":"lookup","arguments":"{\"q\":1}"}
+        ]
+    }))
+    .unwrap();
+    let decoded = decode(
+        &request(GenerateMode::Complete),
+        responses,
+        WireResponse::Json(JsonResponse {
+            metadata: metadata(),
+            body: hosted_body,
+        }),
+    )
+    .unwrap();
+    let DecodedResponse::Complete(OperationResponse::Generate(response)) = decoded else {
+        panic!("expected complete generation response")
+    };
+    assert_eq!(response.finish, FinishReason::ToolCalls);
+    assert!(response.output.iter().any(|item| matches!(
+        item,
+        OutputItem::ToolExecution(ToolExecution {
+            state: ToolExecutionState::Completed,
+            output: Some(_),
+            ..
+        })
+    )));
+    assert!(response.output.iter().any(|item| matches!(
+        item,
+        OutputItem::McpApprovalRequest(request)
+            if request.server_label == "docs" && request.name == "lookup"
+    )));
 }
 
-#[tokio::test]
-async fn decodes_claude_sse_into_semantic_text_delta() {
+#[test]
+fn decodes_chat_complete_tool_call_response() {
     let target = OperationKey::content_generation(
-        Operation::StreamGenerateContent,
-        ContentGenerationKind::ClaudeMessages,
+        Operation::GenerateContent,
+        ContentGenerationKind::OpenAiChatCompletions,
     );
-    let bytes = Bytes::from_static(
-        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-test\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
-    );
+    let body = JsonBody::encode(&json!({
+        "id":"chatcmpl_1","object":"chat.completion","created":1,"model":"gpt-test",
+        "choices":[{
+            "index":0,"finish_reason":"tool_calls",
+            "message":{
+                "role":"assistant","content":"hello",
+                "tool_calls":[{"type":"function","id":"call_1",
+                    "function":{"name":"lookup","arguments":"{\"q\":1}"}}]
+            }
+        }],
+        "usage":{
+            "prompt_tokens":5,"completion_tokens":3,"total_tokens":8,
+            "prompt_tokens_details":{"cached_tokens":2},
+            "completion_tokens_details":{"reasoning_tokens":1}
+        }
+    }))
+    .unwrap();
+    let decoded = decode(
+        &request(GenerateMode::Complete),
+        target,
+        WireResponse::Json(JsonResponse {
+            metadata: metadata(),
+            body,
+        }),
+    )
+    .unwrap();
+    let DecodedResponse::Complete(OperationResponse::Generate(response)) = decoded else {
+        panic!("expected complete generation response")
+    };
+    assert_eq!(response.finish, FinishReason::ToolCalls);
+    assert!(matches!(
+        &response.output[0],
+        OutputItem::Message(message)
+            if matches!(&message.content[0], OutputContent::Text { text, .. } if text == "hello")
+    ));
+    assert!(matches!(
+        &response.output[1],
+        OutputItem::ToolCall(ToolCall::Function(call))
+            if call.call_id.0 == "call_1" && call.name == "lookup"
+                && call.arguments == json!({"q":1})
+    ));
+    let usage = response.usage.unwrap();
+    assert_eq!(usage.input_tokens, 5);
+    assert_eq!(usage.output_tokens, 3);
+    assert_eq!(usage.cached_input_tokens, 2);
+    assert_eq!(usage.reasoning_tokens, 1);
+    assert_eq!(usage.total_tokens, 8);
+}
+
+async fn collect_sse_events(
+    target: OperationKey,
+    bytes: &'static [u8],
+) -> Vec<Result<OperationEvent, crate::CoreError>> {
     let decoded = decode(
         &request(GenerateMode::Stream),
         target,
         WireResponse::JsonSse(JsonSseResponse {
             metadata: metadata(),
-            stream: parse_json_sse(Box::pin(stream::iter([Ok(bytes)]))),
+            stream: parse_json_sse(Box::pin(stream::iter([Ok(Bytes::from_static(bytes))]))),
         }),
     )
     .unwrap();
     let DecodedResponse::Stream(stream) = decoded else {
         panic!("expected stream")
     };
-    let events = stream.collect::<Vec<_>>().await;
+    stream.collect::<Vec<_>>().await
+}
+
+#[tokio::test]
+async fn decodes_claude_sse_text_delta_and_reasoning_continuation() {
+    let target = OperationKey::content_generation(
+        Operation::StreamGenerateContent,
+        ContentGenerationKind::ClaudeMessages,
+    );
+    let events = collect_sse_events(
+        target,
+        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-test\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hidden\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signature\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    )
+    .await;
     assert!(events.iter().any(|event| matches!(
         event,
         Ok(OperationEvent::Generate(GenerateEvent::Delta(GenerateDelta::Text(
             ContentTextDelta { delta, .. }
         )))) if delta == "hello"
     )));
-}
-
-#[tokio::test]
-async fn decodes_claude_stream_reasoning_continuation() {
-    let target = OperationKey::content_generation(
-        Operation::StreamGenerateContent,
-        ContentGenerationKind::ClaudeMessages,
-    );
-    let bytes = Bytes::from_static(
-        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-test\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hidden\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signature\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
-    );
-    let decoded = decode(
-        &request(GenerateMode::Stream),
-        target,
-        WireResponse::JsonSse(JsonSseResponse {
-            metadata: metadata(),
-            stream: parse_json_sse(Box::pin(stream::iter([Ok(bytes)]))),
-        }),
-    )
-    .unwrap();
-    let DecodedResponse::Stream(stream) = decoded else {
-        panic!("expected stream")
-    };
-    let events = stream.collect::<Vec<_>>().await;
     assert!(events.iter().any(|event| matches!(
         event,
         Ok(OperationEvent::Generate(GenerateEvent::OutputFinished(OutputFinished {
@@ -399,27 +559,95 @@ async fn decodes_claude_stream_reasoning_continuation() {
 }
 
 #[tokio::test]
+async fn decodes_gemini_sse_thought_and_text_chunks() {
+    let target = OperationKey::content_generation(
+        Operation::StreamGenerateContent,
+        ContentGenerationKind::GeminiGenerateContent,
+    );
+    let events = collect_sse_events(
+        target,
+        b"data: {\"responseId\":\"gen_1\",\"modelVersion\":\"gemini-test\",\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hidden\",\"thought\":true,\"thoughtSignature\":\"signature\"}]}}]}\n\ndata: {\"responseId\":\"gen_1\",\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":4,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":9}}\n\n",
+    )
+    .await;
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::Delta(GenerateDelta::Text(
+            ContentTextDelta { delta, .. }
+        )))) if delta == "hello"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::OutputFinished(OutputFinished {
+            item: OutputItem::Reasoning(ReasoningOutput { parts, .. }),
+            ..
+        }))) if matches!(
+            &parts[0],
+            ReasoningPart::Text {
+                text,
+                continuation: Some(ReasoningContinuation::GeminiThoughtSignature { signature })
+            } if text == "hidden" && signature == "signature"
+        )
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::Finished(GenerationFinished {
+            finish: FinishReason::Stop,
+            usage: Some(usage),
+        }))) if usage.output_tokens == 5
+    )));
+}
+
+#[tokio::test]
+async fn decodes_chat_sse_text_and_tool_argument_chunks() {
+    let target = OperationKey::content_generation(
+        Operation::StreamGenerateContent,
+        ContentGenerationKind::OpenAiChatCompletions,
+    );
+    let events = collect_sse_events(
+        target,
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":1}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\ndata: [DONE]\n\n",
+    )
+    .await;
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::Delta(GenerateDelta::Text(
+            ContentTextDelta { delta, .. }
+        )))) if delta == "hello"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::Delta(GenerateDelta::FunctionArguments(
+            JsonFragmentDelta { delta, .. }
+        )))) if delta == "{\"q\":1}"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::OutputFinished(OutputFinished {
+            item: OutputItem::ToolCall(ToolCall::Function(call)),
+            ..
+        }))) if call.call_id.0 == "call_1" && call.name == "lookup"
+            && call.arguments == json!({"q":1})
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(OperationEvent::Generate(GenerateEvent::Finished(GenerationFinished {
+            finish: FinishReason::ToolCalls,
+            usage: Some(usage),
+        }))) if usage.input_tokens == 5 && usage.output_tokens == 3
+    )));
+}
+
+#[tokio::test]
 async fn preserves_stream_tool_call_finish_reason() {
     let target = OperationKey::content_generation(
         Operation::StreamGenerateContent,
         ContentGenerationKind::OpenAiResponses,
     );
-    let bytes = Bytes::from_static(
-        b"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"test\",\"status\":\"completed\",\"output\":[]}}\n\n",
-    );
-    let decoded = decode(
-        &request(GenerateMode::Stream),
+    let events = collect_sse_events(
         target,
-        WireResponse::JsonSse(JsonSseResponse {
-            metadata: metadata(),
-            stream: parse_json_sse(Box::pin(stream::iter([Ok(bytes)]))),
-        }),
+        b"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"test\",\"status\":\"completed\",\"output\":[]}}\n\n",
     )
-    .unwrap();
-    let DecodedResponse::Stream(stream) = decoded else {
-        panic!("expected stream")
-    };
-    let events = stream.collect::<Vec<_>>().await;
+    .await;
     assert!(events.iter().any(|event| matches!(
         event,
         Ok(OperationEvent::Generate(GenerateEvent::Finished(

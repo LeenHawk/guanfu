@@ -16,7 +16,8 @@ pub enum ToolDefinition {
     TextEditor(TextEditorTool),
     ImageGeneration(ImageGenerationTool),
     Mcp(McpTool),
-    Memory(MemoryTool),
+    /// Claude memory_20250818；调用以名为 `memory` 的 function call 到达客户端。
+    Memory,
     ToolSearch(ToolSearchTool),
 }
 
@@ -147,17 +148,15 @@ pub struct McpTool {
     pub approval: McpApproval,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpApproval {
     Always,
     Never,
-    PerTool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-pub struct MemoryTool {
-    pub name: String,
+    PerTool {
+        always: Vec<String>,
+        never: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]

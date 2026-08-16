@@ -8,6 +8,7 @@ pub mod client;
 pub mod codec;
 pub mod ir;
 pub mod pool;
+pub mod realtime;
 pub mod routing;
 pub mod wire;
 

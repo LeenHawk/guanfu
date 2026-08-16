@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{MediaSource, ModelId, OperationFailure, Usage};
+use super::{MediaSource, ModelId, Usage};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -83,7 +83,7 @@ pub struct DiarizationConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct KnownSpeaker {
     pub name: String,
-    pub reference: Option<MediaSource>,
+    pub reference: MediaSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -180,15 +180,12 @@ pub enum SpeechEvent {
         bytes: bytes::Bytes,
     },
     Finished,
-    Failed(OperationFailure),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TranscriptionEvent {
-    Started,
     TextDelta { text: String },
     Segment(TranscriptSegment),
     Finished(Transcription),
-    Failed(OperationFailure),
 }

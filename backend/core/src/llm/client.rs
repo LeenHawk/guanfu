@@ -19,6 +19,7 @@ pub struct CallTarget<'a> {
 
 pub struct LlmClient {
     http: reqwest::Client,
+    connect_timeout: Duration,
     request_timeout: Duration,
 }
 
@@ -46,6 +47,7 @@ impl LlmClient {
             .expect("reqwest client construction is infallible with these options");
         Self {
             http,
+            connect_timeout,
             request_timeout,
         }
     }
@@ -133,6 +135,70 @@ impl LlmClient {
             }
         };
         Ok(WireResult::Success(response))
+    }
+
+    /// 建立 Realtime WebSocket 会话并应用初始会话配置。
+    /// 仅 OpenAI 系上游(端点合成对其他 provider 返回错误)。
+    pub async fn connect_realtime(
+        &self,
+        target: &CallTarget<'_>,
+        request: &crate::llm::ir::platform::ConnectRealtimeRequest,
+    ) -> Result<crate::llm::realtime::RealtimeConnection, CoreError> {
+        use futures_util::SinkExt;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let key = gproxy_protocol::OperationKey::provider(
+            gproxy_protocol::Operation::ConnectRealtime,
+            Provider::OpenAi,
+        );
+        let endpoint =
+            gproxy_protocol::endpoint::request_target(key, &request.session.model.0, false)
+                .map_err(|error| CoreError::Endpoint(error.to_string()))?;
+        let base = target.base_url.trim_end_matches('/');
+        let base = if let Some(rest) = base.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else if let Some(rest) = base.strip_prefix("http://") {
+            format!("ws://{rest}")
+        } else {
+            return Err(CoreError::Endpoint(format!(
+                "realtime requires an http(s) base url, got {base}"
+            )));
+        };
+        let mut url = format!("{base}{}", endpoint.path);
+        if let Some(query) = endpoint.query {
+            url.push('?');
+            url.push_str(&query);
+        }
+        let mut ws_request = url
+            .into_client_request()
+            .map_err(|error| CoreError::WebSocket(error.to_string()))?;
+        ws_request.headers_mut().insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_str(&format!("Bearer {}", target.secret))
+                .map_err(|error| CoreError::WebSocket(error.to_string()))?,
+        );
+
+        let (mut socket, _) = tokio::time::timeout(
+            self.connect_timeout,
+            tokio_tungstenite::connect_async(ws_request),
+        )
+        .await
+        .map_err(|_| CoreError::WebSocket("realtime connect timed out".to_owned()))?
+        .map_err(crate::llm::realtime::ws_error)?;
+
+        let update = crate::llm::codec::realtime::encode_client_event(
+            &crate::llm::ir::realtime::RealtimeClientEvent::UpdateSession {
+                session: Box::new(request.session.clone()),
+            },
+        )?;
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::text(
+                serde_json::to_string(&update)?,
+            ))
+            .await
+            .map_err(crate::llm::realtime::ws_error)?;
+
+        Ok(crate::llm::realtime::RealtimeConnection::new(socket))
     }
 }
 

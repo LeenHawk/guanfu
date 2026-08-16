@@ -5,9 +5,9 @@ pub(super) fn decode_image_stream(
     target: OperationKey,
     stream: crate::llm::wire::JsonSseStream,
 ) -> Result<DecodedResponse, CoreError> {
-    let expected = match request {
-        ImageRequest::Generate(_) => "image_generation",
-        ImageRequest::Edit(_) => "image_edit",
+    let (expected, total) = match request {
+        ImageRequest::Generate(request) => ("image_generation", request.options.partial_images),
+        ImageRequest::Edit(request) => ("image_edit", request.options.partial_images),
     };
     Ok(DecodedResponse::Stream(crate::llm::codec::map_sse(
         stream,
@@ -22,38 +22,61 @@ pub(super) fn decode_image_stream(
                 .get("type")
                 .and_then(Value::as_str)
                 .ok_or_else(|| invalid_payload(target, "image stream event type is missing"))?;
-            let event = if kind == format!("{expected}.partial_image") {
+            let events = if kind == format!("{expected}.partial_image") {
                 let encoded = value_field(&value, "b64_json")?;
                 let sequence = required_u32(&value, "partial_image_index", target)?;
-                crate::llm::ir::images::ImageEvent::Preview(ImagePreview {
-                    index: 0,
-                    sequence,
-                    image: ImageArtifact {
-                        id: crate::llm::ir::OutputId(sequence.to_string()),
-                        source: MediaSource::Data {
-                            media_type: crate::llm::ir::MediaType("image/png".into()),
-                            bytes: Bytes::from(
-                                base64::engine::general_purpose::STANDARD
-                                    .decode(encoded)
-                                    .map_err(|error| CoreError::Endpoint(error.to_string()))?,
-                            ),
+                vec![
+                    ImageEvent::Progress(ImageProgress {
+                        completed: sequence + 1,
+                        total,
+                    }),
+                    ImageEvent::Preview(ImagePreview {
+                        index: 0,
+                        sequence,
+                        image: ImageArtifact {
+                            id: crate::llm::ir::OutputId(sequence.to_string()),
+                            source: MediaSource::Data {
+                                media_type: crate::llm::ir::MediaType("image/png".into()),
+                                bytes: Bytes::from(
+                                    base64::engine::general_purpose::STANDARD
+                                        .decode(encoded)
+                                        .map_err(|error| CoreError::Endpoint(error.to_string()))?,
+                                ),
+                            },
+                            revised_prompt: None,
                         },
-                        revised_prompt: None,
-                    },
-                })
+                    }),
+                ]
             } else if kind == format!("{expected}.completed") {
-                crate::llm::ir::images::ImageEvent::Finished(super::response::decode_images(
-                    &value, target,
-                )?)
+                vec![ImageEvent::Finished(super::response::decode_images(
+                    &completed_response(&value),
+                    target,
+                )?)]
             } else {
                 return Err(CoreError::UnmodeledProviderEvent {
                     target,
                     event: kind.into(),
                 });
             };
-            Ok(vec![OperationEvent::Image(event)])
+            Ok(events.into_iter().map(OperationEvent::Image).collect())
         },
     )))
+}
+
+/// The completed stream event carries a single top-level `b64_json` artifact;
+/// wrap it into the buffered response shape expected by `decode_images`.
+fn completed_response(value: &Value) -> Value {
+    if value.get("data").is_some() {
+        return value.clone();
+    }
+    let mut wrapper = serde_json::Map::new();
+    for field in ["usage", "output_format"] {
+        if let Some(entry) = value.get(field) {
+            wrapper.insert(field.into(), entry.clone());
+        }
+    }
+    wrapper.insert("data".into(), Value::Array(vec![value.clone()]));
+    Value::Object(wrapper)
 }
 
 pub(super) fn decode_speech_stream(

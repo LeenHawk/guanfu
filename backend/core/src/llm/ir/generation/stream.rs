@@ -35,9 +35,10 @@ pub struct OutputStarted {
 pub enum OutputKind {
     Message,
     Reasoning,
+    Compaction,
     ToolCall,
     ToolExecution,
-    Image,
+    McpApprovalRequest,
     Audio,
 }
 
@@ -55,7 +56,6 @@ pub enum ContentKind {
     Text,
     Refusal,
     ReasoningText,
-    ToolInput,
     Audio,
     Transcript,
     Image,
@@ -68,7 +68,6 @@ pub enum GenerateDelta {
     Refusal(ContentTextDelta),
     ReasoningSummary(ContentTextDelta),
     ReasoningText(ContentTextDelta),
-    Compaction(CompactionDelta),
     FunctionArguments(JsonFragmentDelta),
     CustomToolInput(OutputTextDelta),
     Audio(BinaryDelta),
@@ -95,13 +94,6 @@ pub struct OutputTextDelta {
 pub struct JsonFragmentDelta {
     pub output_index: u32,
     pub delta: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-pub struct CompactionDelta {
-    pub output_index: u32,
-    pub content: String,
-    pub encrypted_content: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]

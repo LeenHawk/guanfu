@@ -1,5 +1,6 @@
 mod generation;
 mod other;
+pub(crate) mod realtime;
 
 use std::pin::Pin;
 

@@ -58,6 +58,13 @@ async fn execute_llm(
             });
             Ok(Sse::new(stream).into_response())
         }
+        // Realtime 双工需要专用 WebSocket 端点,通用 /api/llm 不承载。
+        SemanticLlmOutput::Realtime(_) => {
+            Err(guanfu_core::CoreError::UnsupportedRouteImplementation {
+                implementation: "realtime over the generic /api/llm endpoint",
+            }
+            .into())
+        }
     }
 }
 

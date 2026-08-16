@@ -26,7 +26,7 @@ pub(super) fn encode_request(request: &GenerateRequest) -> Result<Value, CoreErr
     }
     body.insert(
         "tool_choice".into(),
-        encode_tool_choice(&request.tool_choice),
+        encode_tool_choice(&request.tool_choice, &request.tools),
     );
     body.insert("text".into(), encode_output_constraint(&request.output));
     if let Some(reasoning) = encode_reasoning(request.reasoning.as_ref()) {
@@ -87,6 +87,11 @@ pub(in crate::llm::codec) fn encode_input(
                     "content": encode_content(&message.content)?,
                 })),
                 InputItem::ToolResult { result } => encode_tool_result(result),
+                InputItem::McpApproval { approval } => Ok(json!({
+                    "type": "mcp_approval_response",
+                    "approval_request_id": approval.approval_request_id,
+                    "approve": approval.approve,
+                })),
                 InputItem::Reasoning { reasoning } => Ok(encode_reasoning_input(reasoning)),
             })
             .collect::<Result<Vec<_>, CoreError>>()?,
@@ -222,7 +227,6 @@ fn encode_tool_result(result: &ToolResult) -> Result<Value, CoreError> {
         ToolResultKind::CodeExecution => "code_interpreter_call_output",
         ToolResultKind::Shell => "shell_call_output",
         ToolResultKind::TextEditor => "apply_patch_call_output",
-        ToolResultKind::Mcp => "mcp_approval_response",
         ToolResultKind::Memory => "function_call_output",
         ToolResultKind::ToolSearch => "tool_search_output",
     };
@@ -238,7 +242,26 @@ pub(in crate::llm::codec) fn encode_tool(tool: &ToolDefinition) -> Result<Value,
             json!({"type":"custom","name":tool.name,"description":tool.description,"format":match &tool.input_format { CustomToolInputFormat::Text=>Value::Null, CustomToolInputFormat::Grammar{syntax,definition}=>json!({"type":snake(syntax),"definition":definition}) }})
         }
         ToolDefinition::WebSearch(tool) => {
-            json!({"type":"web_search","search_context_size":tool.search_context_size.as_ref().map(snake),"user_location":tool.user_location,"filters":{"allowed_domains":tool.allowed_domains,"blocked_domains":tool.blocked_domains}})
+            let mut value = Map::new();
+            value.insert("type".into(), json!("web_search"));
+            insert_option(
+                &mut value,
+                "search_context_size",
+                tool.search_context_size.as_ref().map(snake),
+            );
+            insert_option(&mut value, "user_location", tool.user_location.as_ref());
+            insert_option(&mut value, "max_uses", tool.max_uses);
+            let mut filters = Map::new();
+            if !tool.allowed_domains.is_empty() {
+                filters.insert("allowed_domains".into(), json!(tool.allowed_domains));
+            }
+            if !tool.blocked_domains.is_empty() {
+                filters.insert("blocked_domains".into(), json!(tool.blocked_domains));
+            }
+            if !filters.is_empty() {
+                value.insert("filters".into(), Value::Object(filters));
+            }
+            Value::Object(value)
         }
         ToolDefinition::WebFetch(tool) => {
             json!({"type":"web_fetch","allowed_domains":tool.allowed_domains,"blocked_domains":tool.blocked_domains,"max_uses":tool.max_uses})
@@ -253,31 +276,77 @@ pub(in crate::llm::codec) fn encode_tool(tool: &ToolDefinition) -> Result<Value,
             json!({"type":"code_interpreter","container":tool.container.as_deref().unwrap_or("auto")})
         }
         ToolDefinition::Shell(tool) => json!({"type":"shell","environment":tool.environment}),
-        ToolDefinition::TextEditor(_) => json!({"type":"apply_patch"}),
+        ToolDefinition::TextEditor(tool) => {
+            json!({"type":"apply_patch","max_characters":tool.max_characters})
+        }
         ToolDefinition::ImageGeneration(tool) => {
             json!({"type":"image_generation","size":tool.size,"quality":tool.quality,"background":tool.background,"output_format":tool.output_format})
         }
         ToolDefinition::Mcp(tool) => {
-            json!({"type":"mcp","server_label":tool.server_label,"server_url":tool.server_url,"allowed_tools":tool.allowed_tools,"require_approval":snake(&tool.approval)})
+            json!({"type":"mcp","server_label":tool.server_label,"server_url":tool.server_url,"allowed_tools":tool.allowed_tools,"require_approval":encode_mcp_approval(&tool.approval)})
         }
-        ToolDefinition::Memory(tool) => {
-            json!({"type":"function","name":tool.name,"description":"Persistent memory operation","parameters":{"type":"object"},"strict":false})
-        }
+        ToolDefinition::Memory => json!({"type":"memory"}),
         ToolDefinition::ToolSearch(tool) => {
             json!({"type":"tool_search","parameters":{"deferred_tools":tool.deferred_tools}})
         }
     })
 }
 
-fn encode_tool_choice(choice: &ToolChoice) -> Value {
+fn encode_mcp_approval(approval: &McpApproval) -> Value {
+    match approval {
+        McpApproval::Always => json!("always"),
+        McpApproval::Never => json!("never"),
+        McpApproval::PerTool { always, never } => {
+            json!({"always":{"tool_names":always},"never":{"tool_names":never}})
+        }
+    }
+}
+
+pub(in crate::llm::codec) fn encode_tool_choice(
+    choice: &ToolChoice,
+    tools: &[ToolDefinition],
+) -> Value {
     match choice {
         ToolChoice::Auto => Value::String("auto".into()),
         ToolChoice::None => Value::String("none".into()),
         ToolChoice::Required => Value::String("required".into()),
         ToolChoice::Tool { name } => json!({"type":"function","name":name}),
         ToolChoice::Allowed { names, mode } => {
-            json!({"type":"allowed_tools","mode":snake(mode),"tools":names.iter().map(|name|json!({"type":"function","name":name})).collect::<Vec<_>>() })
+            json!({"type":"allowed_tools","mode":snake(mode),"tools":names.iter().map(|name|allowed_tool_entry(name, tools)).collect::<Vec<_>>() })
         }
+    }
+}
+
+/// allowed_tools 条目按定义列表还原工具类型；托管工具按 wire type 名引用。
+fn allowed_tool_entry(name: &str, tools: &[ToolDefinition]) -> Value {
+    for tool in tools {
+        match tool {
+            ToolDefinition::Function(tool) if tool.name == name => {
+                return json!({"type":"function","name":name})
+            }
+            ToolDefinition::Custom(tool) if tool.name == name => {
+                return json!({"type":"custom","name":name})
+            }
+            ToolDefinition::Mcp(tool)
+                if tool.server_label == name || tool.allowed_tools.iter().any(|n| n == name) =>
+            {
+                return json!({"type":"mcp","server_label":tool.server_label,"name":name})
+            }
+            _ => {}
+        }
+    }
+    match name {
+        "web_search"
+        | "web_fetch"
+        | "file_search"
+        | "computer_use_preview"
+        | "code_interpreter"
+        | "shell"
+        | "apply_patch"
+        | "image_generation"
+        | "memory"
+        | "tool_search" => json!({"type":name}),
+        _ => json!({"type":"function","name":name}),
     }
 }
 
@@ -290,6 +359,50 @@ fn encode_output_constraint(output: &OutputConstraint) -> Value {
             schema,
             strict,
         } => json!({"format":{"type":"json_schema","name":name,"schema":schema.0,"strict":strict}}),
+    }
+}
+
+/// OpenAI 系目标是 canonical 直通，gproxy 扩展的工具语义（web_fetch、memory、
+/// web_search 限额与屏蔽域名、text_editor 字符上限）没有官方落点，显式
+/// route incompatible 参与路由回退，不能静默发给真实上游。
+pub(super) fn validate_target_tools(
+    request: &GenerateRequest,
+    target: OperationKey,
+) -> Result<(), CoreError> {
+    let OperationKind::ContentGeneration(kind) = target.kind() else {
+        return Ok(());
+    };
+    if !matches!(
+        kind,
+        ContentGenerationKind::OpenAiResponses
+            | ContentGenerationKind::OpenAiResponsesWebSocket
+            | ContentGenerationKind::OpenAiChatCompletions
+    ) {
+        return Ok(());
+    }
+    let mut fields = Vec::new();
+    for tool in &request.tools {
+        match tool {
+            ToolDefinition::WebFetch(_) => fields.push("tools[].web_fetch".to_owned()),
+            ToolDefinition::Memory => fields.push("tools[].memory".to_owned()),
+            ToolDefinition::WebSearch(tool) => {
+                if tool.max_uses.is_some() {
+                    fields.push("tools[].web_search.max_uses".to_owned());
+                }
+                if !tool.blocked_domains.is_empty() {
+                    fields.push("tools[].web_search.blocked_domains".to_owned());
+                }
+            }
+            ToolDefinition::TextEditor(tool) if tool.max_characters.is_some() => {
+                fields.push("tools[].text_editor.max_characters".to_owned());
+            }
+            _ => {}
+        }
+    }
+    if fields.is_empty() {
+        Ok(())
+    } else {
+        Err(CoreError::IncompatibleRoute { target, fields })
     }
 }
 

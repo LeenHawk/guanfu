@@ -8,6 +8,9 @@ pub enum CoreError {
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("websocket error: {0}")]
+    WebSocket(String),
+
     #[error("invalid JSON data: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -93,7 +96,7 @@ impl CoreError {
 
         let (code, details) = match self {
             Self::Db(_) => (ErrorCode::Database, None),
-            Self::Http(_) => (ErrorCode::UpstreamUnavailable, None),
+            Self::Http(_) | Self::WebSocket(_) => (ErrorCode::UpstreamUnavailable, None),
             Self::Json(_) => (ErrorCode::InvalidData, None),
             Self::Endpoint(_) | Self::Transform(_) | Self::InvalidRoutingRule { .. } => {
                 (ErrorCode::InvalidRoute, None)

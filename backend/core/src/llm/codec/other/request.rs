@@ -129,6 +129,43 @@ pub(super) fn canonical_request(
             Vec::new(),
             ResponseMode::Json,
         ),
+        OperationRequest::Video(VideoRequest::Create(request)) => (
+            json_body(json!({
+                "model": request.model.0,
+                "prompt": request.prompt,
+                "seconds": request.seconds.map(|value| value.to_string()),
+                "size": request.size,
+                "input_reference": request
+                    .input_reference
+                    .as_ref()
+                    .map(video_input_reference)
+                    .transpose()?,
+            }))?,
+            Vec::new(),
+            ResponseMode::Json,
+        ),
+        OperationRequest::Video(VideoRequest::List(request)) => {
+            let query = [
+                request.limit.map(|value| QueryParam {
+                    name: "limit".into(),
+                    value: value.to_string(),
+                }),
+                request.cursor.as_ref().map(|value| QueryParam {
+                    name: "after".into(),
+                    value: value.clone(),
+                }),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            (RequestBody::Empty, query, ResponseMode::Json)
+        }
+        OperationRequest::Video(VideoRequest::Retrieve(_) | VideoRequest::Delete(_)) => {
+            (RequestBody::Empty, Vec::new(), ResponseMode::Json)
+        }
+        OperationRequest::Video(VideoRequest::DownloadContent(_)) => {
+            (RequestBody::Empty, Vec::new(), ResponseMode::Binary)
+        }
         OperationRequest::Platform(PlatformRequest::Compact(request)) => (
             json_body(
                 json!({"model":request.model.0,"input":crate::llm::codec::generation::request::encode_input(&request.instructions,&request.input)?,"max_output_tokens":request.max_output_tokens}),
@@ -143,9 +180,31 @@ pub(super) fn canonical_request(
             Vec::new(),
             ResponseMode::Json,
         ),
-        OperationRequest::Platform(
-            PlatformRequest::CreateRealtimeCall(_) | PlatformRequest::ConnectRealtime(_),
-        ) => return Err(unsupported(Capability::Realtime, key)),
+        OperationRequest::Platform(PlatformRequest::CreateRealtimeCall(request)) => {
+            let session = serde_json::to_string(&crate::llm::codec::realtime::encode_session(
+                &request.session,
+            )?)?;
+            (
+                RequestBody::Multipart(MultipartBody {
+                    parts: vec![
+                        MultipartPart {
+                            name: "sdp".into(),
+                            value: MultipartValue::Text(request.offer_sdp.clone()),
+                        },
+                        MultipartPart {
+                            name: "session".into(),
+                            value: MultipartValue::Text(session),
+                        },
+                    ],
+                }),
+                Vec::new(),
+                ResponseMode::Binary,
+            )
+        }
+        // WebSocket 连接不走 HTTP codec,service 层在此之前拦截。
+        OperationRequest::Platform(PlatformRequest::ConnectRealtime(_)) => {
+            return Err(unsupported(Capability::Realtime, key))
+        }
         OperationRequest::Generate(_) => unreachable!("generation codec handles generation"),
     };
     Ok((key, result.0, result.1, result.2))
@@ -223,6 +282,25 @@ fn image_edit_multipart(request: &EditImageRequest) -> Result<RequestBody, CoreE
         "output_format",
         enum_string(request.options.output_format),
     );
+    push_opt(
+        &mut parts,
+        "background",
+        enum_string(request.options.background),
+    );
+    push_opt(
+        &mut parts,
+        "output_compression",
+        request.options.compression,
+    );
+    push_opt(
+        &mut parts,
+        "moderation",
+        enum_string(request.options.moderation),
+    );
+    push_opt(&mut parts, "partial_images", request.options.partial_images);
+    if request.mode == ImageMode::Stream {
+        parts.push(text_part("stream", "true"));
+    }
     Ok(RequestBody::Multipart(MultipartBody { parts }))
 }
 
@@ -243,7 +321,54 @@ fn transcription_multipart(request: &TranscriptionRequest) -> Result<RequestBody
             &enum_string(Some(*value)).expect("timestamp granularity serializes as a string"),
         ));
     }
+    if let Some(diarization) = &request.diarization {
+        for speaker in &diarization.known_speakers {
+            parts.push(text_part("known_speaker_names[]", &speaker.name));
+            parts.push(text_part(
+                "known_speaker_references[]",
+                &media_json(&speaker.reference)?,
+            ));
+        }
+        if let Some(chunking) = &diarization.chunking {
+            parts.push(text_part(
+                "chunking_strategy",
+                &chunking_strategy(chunking)?,
+            ));
+        }
+    }
+    let response_format = if request.diarization.is_some() {
+        Some("diarized_json")
+    } else if !request.timestamps.is_empty() {
+        Some("verbose_json")
+    } else {
+        None
+    };
+    push_opt(&mut parts, "response_format", response_format);
     Ok(RequestBody::Multipart(MultipartBody { parts }))
+}
+
+fn chunking_strategy(chunking: &AudioChunking) -> Result<String, CoreError> {
+    Ok(match chunking {
+        AudioChunking::Auto => "auto".into(),
+        AudioChunking::ServerVad {
+            threshold,
+            prefix_padding_ms,
+            silence_duration_ms,
+        } => {
+            let mut object = serde_json::Map::new();
+            object.insert("type".into(), json!("server_vad"));
+            if let Some(value) = threshold {
+                object.insert("threshold".into(), json!(value));
+            }
+            if let Some(value) = prefix_padding_ms {
+                object.insert("prefix_padding_ms".into(), json!(value));
+            }
+            if let Some(value) = silence_duration_ms {
+                object.insert("silence_duration_ms".into(), json!(value));
+            }
+            serde_json::to_string(&Value::Object(object))?
+        }
+    })
 }
 
 fn translation_multipart(request: &TranslationRequest) -> Result<RequestBody, CoreError> {
@@ -254,4 +379,17 @@ fn translation_multipart(request: &TranslationRequest) -> Result<RequestBody, Co
     push_opt(&mut parts, "prompt", request.prompt.clone());
     push_opt(&mut parts, "temperature", request.temperature);
     Ok(RequestBody::Multipart(MultipartBody { parts }))
+}
+
+/// 参考图编码为 canonical OpenAI 形态:内联数据 → data URL,URL → image_url。
+fn video_input_reference(source: &MediaSource) -> Result<Value, CoreError> {
+    Ok(match source {
+        MediaSource::Data { media_type, bytes } => Value::String(format!(
+            "data:{};base64,{}",
+            media_type.0,
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )),
+        MediaSource::Url { url } => json!({ "image_url": url }),
+        MediaSource::File { id } => json!({ "file_id": id.0 }),
+    })
 }

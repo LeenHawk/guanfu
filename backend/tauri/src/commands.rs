@@ -63,6 +63,12 @@ pub async fn execute_llm(
             }
             Ok(None)
         }
+        // Realtime 双工需要专用通道(后续以独立 command + Channel 暴露)。
+        SemanticLlmOutput::Realtime(_) => Err(api_error(
+            guanfu_core::CoreError::UnsupportedRouteImplementation {
+                implementation: "realtime over the generic invoke command",
+            },
+        )),
     };
     active
         .0

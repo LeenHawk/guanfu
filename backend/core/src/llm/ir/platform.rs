@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::generation::{GenerateRequest, InputItem, Instruction, OutputItem};
+use super::generation::{InputItem, Instruction, OutputItem};
+use super::realtime::RealtimeSession;
 use super::{ModelId, Usage};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -34,49 +35,7 @@ pub struct CreateRealtimeCallRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ConnectRealtimeRequest {
-    pub model: ModelId,
     pub session: RealtimeSession,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-pub struct RealtimeSession {
-    pub model: ModelId,
-    pub instructions: Vec<Instruction>,
-    pub modalities: Vec<RealtimeModality>,
-    pub voice: Option<String>,
-    pub input_audio_format: Option<String>,
-    pub output_audio_format: Option<String>,
-    pub turn_detection: Option<TurnDetection>,
-    pub generation: Option<Box<GenerateRequest>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
-pub enum RealtimeModality {
-    Text,
-    Audio,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TurnDetection {
-    ServerVad {
-        threshold: Option<f32>,
-        prefix_padding_ms: Option<u32>,
-        silence_duration_ms: Option<u32>,
-    },
-    SemanticVad {
-        eagerness: Option<SemanticVadEagerness>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
-pub enum SemanticVadEagerness {
-    Low,
-    Medium,
-    High,
-    Auto,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -102,6 +61,7 @@ pub struct Conversation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct RealtimeCall {
-    pub id: String,
+    /// 来自 `Location` 响应头的 call id;上游未返回时为 None。
+    pub id: Option<String>,
     pub answer_sdp: String,
 }
