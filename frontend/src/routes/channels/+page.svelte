@@ -7,6 +7,7 @@
   import { api } from "$lib/api/channels";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
+  import TokenGate from "$lib/components/TokenGate.svelte";
   import ChannelDialog from "$lib/components/ChannelDialog.svelte";
   import ChannelSidebar from "$lib/components/ChannelSidebar.svelte";
   import ChannelWorkspace from "$lib/components/ChannelWorkspace.svelte";
@@ -219,6 +220,14 @@
     </div>
   {/if}
 </div>
+
+<TokenGate
+  open={errorCode === "unauthorized"}
+  onsaved={() => {
+    errorCode = null;
+    void loadChannels();
+  }}
+/>
 
 <ChannelDialog
   open={dialogOpen}

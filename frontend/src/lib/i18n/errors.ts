@@ -11,6 +11,7 @@ export function messageForError(code: string): string {
     no_usable_credential: m.error_no_usable_credential,
     unsupported_route: m.error_unsupported_route,
     upstream_rejected: m.error_upstream_rejected,
+    unauthorized: m.unauthorized,
   };
   return messages[code]?.() ?? m.error_upstream_unavailable();
 }

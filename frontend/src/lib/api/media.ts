@@ -11,7 +11,12 @@ import type { TranscriptionRequest } from "$lib/bindings/TranscriptionRequest";
 import type { VideoJob } from "$lib/bindings/VideoJob";
 import type { MediaResult } from "$lib/bindings/MediaResult";
 import { toApiClientError } from "$lib/api/error";
-import { invokeCommand, isTauri, requestJson } from "$lib/api/transport";
+import {
+  authToken,
+  invokeCommand,
+  isTauri,
+  requestJson,
+} from "$lib/api/transport";
 
 type Input<T> = { channel_id: number; name: string; request: T };
 
@@ -102,7 +107,9 @@ export async function connectRealtime(
     });
   });
   // 首帧带渠道与会话配置,服务端据此连上游。
-  socket.send(JSON.stringify({ channel_id: channelId, request }));
+  socket.send(
+    JSON.stringify({ token: authToken(), channel_id: channelId, request }),
+  );
   socket.addEventListener("message", (event) =>
     onFrame(JSON.parse(event.data) as RealtimeDownstream),
   );

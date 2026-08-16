@@ -10,6 +10,10 @@ use crate::llm::ir::realtime::RealtimeServerEvent;
 /// 上行首帧:选渠道并给出会话配置(WebSocket 端点用;Tauri 走命令参数)。
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
 pub struct RealtimeHandshake {
+    /// 共享令牌;WebSocket 握手带不了 Authorization 头,又不能塞进 URL
+    /// (query 会进访问日志),所以随首帧校验。
+    #[serde(default)]
+    pub token: Option<String>,
     pub channel_id: i32,
     pub request: crate::llm::ir::platform::ConnectRealtimeRequest,
 }

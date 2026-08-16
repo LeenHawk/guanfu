@@ -131,5 +131,9 @@
   "realtime_ready": "Connected",
   "realtime_listening": "Listening",
   "mic_denied": "Microphone unavailable",
-  "empty_media": "No media yet"
+  "empty_media": "No media yet",
+  "unauthorized": "Access token required",
+  "token_prompt": "This server requires an access token",
+  "token_label": "Access token",
+  "token_save": "Save"
 }

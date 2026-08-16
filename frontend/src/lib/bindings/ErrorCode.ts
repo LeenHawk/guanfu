@@ -11,4 +11,5 @@ export type ErrorCode =
   | "unsupported_capability"
   | "upstream_rejected"
   | "asset_not_found"
-  | "conflict";
+  | "conflict"
+  | "unauthorized";

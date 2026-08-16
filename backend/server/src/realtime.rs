@@ -14,12 +14,13 @@ use guanfu_core::services::llm::SemanticLlmOutput;
 use guanfu_core::services::realtime::{
     RealtimeDownstream as Downstream, RealtimeHandshake as Handshake,
 };
-use guanfu_core::AppState;
-pub async fn handler(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+use crate::routes::RealtimeState;
+pub async fn handler(upgrade: WebSocketUpgrade, State(state): State<RealtimeState>) -> Response {
     upgrade.on_upgrade(move |socket| session(socket, state))
 }
 
-async fn session(socket: WebSocket, state: AppState) {
+async fn session(socket: WebSocket, realtime: RealtimeState) {
+    let RealtimeState { state, token } = realtime;
     let (mut client_tx, mut client_rx) = socket.split();
 
     let handshake = match client_rx.next().await {
@@ -42,6 +43,20 @@ async fn session(socket: WebSocket, state: AppState) {
             return;
         }
     };
+
+    if let Some(expected) = &token {
+        if handshake.token.as_deref() != Some(expected.0.as_str()) {
+            let _ = send_down(
+                &mut client_tx,
+                Downstream::Error {
+                    error: guanfu_core::CoreError::WebSocket("unauthorized".to_owned())
+                        .api_error(),
+                },
+            )
+            .await;
+            return;
+        }
+    }
 
     let output = state
         .llm

@@ -5,6 +5,11 @@ import type { ConnectRealtimeRequest } from "./ConnectRealtimeRequest";
  * 上行首帧:选渠道并给出会话配置(WebSocket 端点用;Tauri 走命令参数)。
  */
 export type RealtimeHandshake = {
+  /**
+   * 共享令牌;WebSocket 握手带不了 Authorization 头,又不能塞进 URL
+   * (query 会进访问日志),所以随首帧校验。
+   */
+  token: string | null;
   channel_id: number;
   request: ConnectRealtimeRequest;
 };

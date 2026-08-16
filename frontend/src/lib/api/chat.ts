@@ -9,7 +9,12 @@ import type { ImportedCharacter } from "$lib/bindings/ImportedCharacter";
 import type { PipelineEvent } from "$lib/bindings/PipelineEvent";
 import type { SessionBindings } from "$lib/bindings/SessionBindings";
 import { ApiClientError, toApiClientError } from "$lib/api/error";
-import { invokeCommand, isTauri, requestJson } from "$lib/api/transport";
+import {
+  authHeaders,
+  invokeCommand,
+  isTauri,
+  requestJson,
+} from "$lib/api/transport";
 
 export const chatApi = {
   bootstrap: (): Promise<ChatBootstrap> =>
@@ -66,7 +71,10 @@ export const chatApi = {
       return invokeCommand("import_character", { bytes: Array.from(bytes) });
     const response = await fetch("/api/characters/import", {
       method: "POST",
-      headers: { "content-type": "application/octet-stream" },
+      headers: {
+        "content-type": "application/octet-stream",
+        ...authHeaders(),
+      },
       body: bytes,
     });
     if (!response.ok) throw new ApiClientError(await response.json());
@@ -83,7 +91,7 @@ export async function runChat(
   if (isTauri()) return runChatTauri(input, onEvent, signal);
   const response = await fetch("/api/chat/runs", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
     signal,
   });

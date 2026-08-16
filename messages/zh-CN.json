@@ -131,5 +131,9 @@
   "realtime_ready": "已连通",
   "realtime_listening": "正在收音",
   "mic_denied": "麦克风不可用",
-  "empty_media": "还没有媒体产物"
+  "empty_media": "还没有媒体产物",
+  "unauthorized": "需要访问令牌",
+  "token_prompt": "该服务端要求访问令牌",
+  "token_label": "访问令牌",
+  "token_save": "保存"
 }

@@ -5,6 +5,7 @@
   import { chatApi } from "$lib/api/chat";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
+  import TokenGate from "$lib/components/TokenGate.svelte";
   import AudioStudio from "$lib/components/AudioStudio.svelte";
   import ImageStudio from "$lib/components/ImageStudio.svelte";
   import MediaGallery from "$lib/components/MediaGallery.svelte";
@@ -122,3 +123,11 @@
     </section>
   </main>
 </div>
+
+<TokenGate
+  open={errorCode === "unauthorized"}
+  onsaved={() => {
+    errorCode = null;
+    void load();
+  }}
+/>

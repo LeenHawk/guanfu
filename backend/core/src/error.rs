@@ -126,6 +126,8 @@ pub enum ErrorCode {
     UpstreamRejected,
     AssetNotFound,
     Conflict,
+    /// 缺少或错误的访问令牌;由 Axum 中间件直接返回,core 不产生。
+    Unauthorized,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]

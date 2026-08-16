@@ -21,8 +21,8 @@ use guanfu_core::services::routing::{PutRoutingRule, RoutingService};
 use guanfu_core::services::runner::{ChatRunRequest, RunnerService};
 use guanfu_core::{AppState, CoreError};
 
-pub fn router(state: AppState) -> Router {
-    Router::new()
+pub fn router(state: AppState, token: Option<crate::auth::Token>) -> Router {
+    let api = Router::new()
         .route("/api/channels", get(list_channels).post(create_channel))
         .route("/api/channels/{id}", delete(delete_channel))
         .route("/api/channels/{id}/enabled", put(set_channel_enabled))
@@ -54,7 +54,6 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(fork_history),
         )
         .route("/api/chat/runs", axum::routing::post(run_chat))
-        .route("/api/realtime", get(crate::realtime::handler))
         .route("/api/media/{id}/content", get(media_content))
         .route("/api/media/images", axum::routing::post(generate_image))
         .route("/api/media/images/edit", axum::routing::post(edit_image))
@@ -66,7 +65,27 @@ pub fn router(state: AppState) -> Router {
             "/api/media/videos/download",
             axum::routing::post(download_video),
         )
-        .with_state(state)
+        .with_state(state.clone());
+    let api = match token.clone() {
+        Some(token) => api.layer(axum::middleware::from_fn_with_state(
+            token,
+            crate::auth::require_token,
+        )),
+        None => api,
+    };
+    // Realtime 走 WebSocket,令牌随首帧校验(见 realtime::session)。
+    api.merge(
+        Router::new()
+            .route("/api/realtime", get(crate::realtime::handler))
+            .with_state(RealtimeState { state, token }),
+    )
+}
+
+/// Realtime 端点自带令牌,不经中间件。
+#[derive(Clone)]
+pub struct RealtimeState {
+    pub state: AppState,
+    pub token: Option<crate::auth::Token>,
 }
 
 async fn execute_llm(

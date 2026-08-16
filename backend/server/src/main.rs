@@ -1,3 +1,4 @@
+mod auth;
 mod realtime;
 mod routes;
 
@@ -20,6 +21,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let asset_root = std::env::var("GUANFU_ASSET_ROOT")
         .unwrap_or_else(|_| "guanfu-assets".to_owned())
         .into();
+    let token = auth::from_env();
+    auth::guard_public_bind(&address, &token)?;
+    if token.is_none() {
+        tracing::warn!("GUANFU_TOKEN is unset; listening on loopback only, no authentication");
+    }
+
     let state = AppState::initialize(AppConfig {
         database_url,
         asset_root,
@@ -27,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
-    tracing::info!(%address, "server listening");
-    axum::serve(listener, routes::router(state)).await?;
+    tracing::info!(%address, authenticated = token.is_some(), "server listening");
+    axum::serve(listener, routes::router(state, token)).await?;
     Ok(())
 }

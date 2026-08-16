@@ -7,6 +7,7 @@
   import { chatApi, runChat } from "$lib/api/chat";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
+  import TokenGate from "$lib/components/TokenGate.svelte";
   import ChatComposer from "$lib/components/ChatComposer.svelte";
   import ChatMessages from "$lib/components/ChatMessages.svelte";
   import ChatSidebar from "$lib/components/ChatSidebar.svelte";
@@ -221,3 +222,11 @@
     {/if}
   </div>
 </div>
+
+<TokenGate
+  open={errorCode === "unauthorized"}
+  onsaved={() => {
+    errorCode = null;
+    void load();
+  }}
+/>
