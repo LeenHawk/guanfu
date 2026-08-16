@@ -124,37 +124,50 @@ impl AssetService {
             });
         }
         let SplitManifest { manifest, chunks } = definition.split()?;
-        write_chunks(db, &chunks).await?;
-        let next = expected_head + 1;
-        // revision 主键冲突即并发提交抢先,视作 CAS 失败。
-        insert_revision(db, id, next, &manifest, created_by_run_id)
-            .await
-            .map_err(|error| match error {
-                CoreError::Db(_) => CoreError::AssetRevisionConflict {
-                    id,
-                    expected: expected_head,
-                },
-                other => other,
-            })?;
-        let moved = asset::Entity::update_many()
-            .col_expr(asset::Column::HeadRevision, next.into())
-            .col_expr(asset::Column::UpdatedAt, OffsetDateTime::now_utc().into())
-            .filter(asset::Column::Id.eq(id))
-            .filter(asset::Column::HeadRevision.eq(expected_head))
-            .exec(db)
-            .await?;
-        if moved.rows_affected == 0 {
-            return Err(CoreError::AssetRevisionConflict {
-                id,
-                expected: expected_head,
-            });
-        }
+        let next =
+            commit_manifest(db, id, expected_head, manifest, chunks, created_by_run_id).await?;
         Ok(AssetHeadDto {
             id,
             kind: D::KIND,
             name: head.name,
             head_revision: next,
         })
+    }
+
+    /// 追加:新增 chunk + 新 manifest,不重写既有单元。
+    ///
+    /// 每轮聊天就是这条路径——写入量与新增内容成正比,与历史长度无关。
+    pub async fn append_units(
+        db: &impl ConnectionTrait,
+        id: i32,
+        expected_head: i32,
+        list: &str,
+        units: &[serde_json::Value],
+        created_by_run_id: Option<i32>,
+    ) -> Result<i32, CoreError> {
+        let manifest = load_manifest(db, id, expected_head).await?;
+        let (hashes, payloads) = crate::assets::split_items(units)?;
+        let mut manifest = manifest;
+        manifest
+            .chunk_lists
+            .entry(list.to_owned())
+            .or_default()
+            .extend(hashes);
+        commit_manifest(db, id, expected_head, manifest, payloads, created_by_run_id).await
+    }
+
+    /// 修订:以 HashEdit 锚定内容而非下标,一批指令原子生效。
+    pub async fn revise_units(
+        db: &impl ConnectionTrait,
+        id: i32,
+        expected_head: i32,
+        list: &str,
+        edits: &[crate::assets::edit::HashEdit],
+        created_by_run_id: Option<i32>,
+    ) -> Result<i32, CoreError> {
+        let manifest = load_manifest(db, id, expected_head).await?;
+        let (manifest, payloads) = crate::assets::edit::apply_hash_edits(&manifest, list, edits)?;
+        commit_manifest(db, id, expected_head, manifest, payloads, created_by_run_id).await
     }
 
     /// fork:新 asset 指向复制的 manifest,chunk 全部结构共享。
@@ -191,6 +204,43 @@ impl AssetService {
         asset::Entity::delete_by_id(id).exec(db).await?;
         Ok(())
     }
+}
+
+/// 共享的 CAS 提交路径:写 chunk → 插入不可变修订 → 移动头指针。
+async fn commit_manifest(
+    db: &impl ConnectionTrait,
+    id: i32,
+    expected_head: i32,
+    manifest: Manifest,
+    chunks: Vec<crate::assets::ChunkPayload>,
+    created_by_run_id: Option<i32>,
+) -> Result<i32, CoreError> {
+    write_chunks(db, &chunks).await?;
+    let next = expected_head + 1;
+    // revision 主键冲突即并发提交抢先,视作 CAS 失败。
+    insert_revision(db, id, next, &manifest, created_by_run_id)
+        .await
+        .map_err(|error| match error {
+            CoreError::Db(_) => CoreError::AssetRevisionConflict {
+                id,
+                expected: expected_head,
+            },
+            other => other,
+        })?;
+    let moved = asset::Entity::update_many()
+        .col_expr(asset::Column::HeadRevision, next.into())
+        .col_expr(asset::Column::UpdatedAt, OffsetDateTime::now_utc().into())
+        .filter(asset::Column::Id.eq(id))
+        .filter(asset::Column::HeadRevision.eq(expected_head))
+        .exec(db)
+        .await?;
+    if moved.rows_affected == 0 {
+        return Err(CoreError::AssetRevisionConflict {
+            id,
+            expected: expected_head,
+        });
+    }
+    Ok(next)
 }
 
 async fn find_head(

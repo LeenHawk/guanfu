@@ -1,9 +1,12 @@
+use guanfu_core::assets::chat_history::ChatHistoryDefinition;
+use guanfu_core::assets::edit::HashEdit;
 use guanfu_core::assets::{
     CharacterDefinition, MediaDefinition, OpenAiChatPresetDefinition, PersonaDefinition,
     PipelineDefinition, RegexScriptDefinition, WorldBookDefinition,
 };
 use guanfu_core::entities::asset::AssetKind;
 use guanfu_core::entities::routing_rule::{RoutingKind, RoutingOperation};
+use guanfu_core::entities::run::RunStatus;
 use guanfu_core::error::{ApiError, ErrorCode};
 use guanfu_core::llm::codec::OperationEvent;
 use guanfu_core::llm::ir::realtime::{RealtimeClientEvent, RealtimeServerEvent};
@@ -14,6 +17,7 @@ use guanfu_core::services::llm::{SemanticLlmRequest, SemanticStreamMessage};
 use guanfu_core::services::routing::{
     OperationKeyDto, PutRoutingRule, RoutingImplementation, RoutingRuleDto,
 };
+use guanfu_core::services::runs::{ResolvedSlot, SlotBinding};
 use ts_rs::{Config, TS};
 
 fn main() -> Result<(), ts_rs::ExportError> {
@@ -46,5 +50,10 @@ fn main() -> Result<(), ts_rs::ExportError> {
     RegexScriptDefinition::export_all(&config)?;
     PipelineDefinition::export_all(&config)?;
     MediaDefinition::export_all(&config)?;
+    ChatHistoryDefinition::export_all(&config)?;
+    HashEdit::export_all(&config)?;
+    RunStatus::export_all(&config)?;
+    SlotBinding::export_all(&config)?;
+    ResolvedSlot::export_all(&config)?;
     Ok(())
 }

@@ -18,6 +18,8 @@ use crate::entities::asset::AssetKind;
 use crate::CoreError;
 
 pub mod character;
+pub mod chat_history;
+pub mod edit;
 pub mod media;
 pub mod persona;
 pub mod pipeline;
@@ -27,6 +29,7 @@ pub mod regex_script;
 pub mod world_book;
 
 pub use character::CharacterDefinition;
+pub use chat_history::ChatHistoryDefinition;
 pub use media::MediaDefinition;
 pub use persona::PersonaDefinition;
 pub use pipeline::PipelineDefinition;
@@ -42,6 +45,22 @@ pub struct ChunkHash(pub String);
 
 pub fn chunk_hash(bytes: &[u8]) -> ChunkHash {
     ChunkHash(hex::encode(Sha256::digest(bytes)))
+}
+
+/// canonical 内容字节:一律经 `serde_json::Value` 落字节。
+///
+/// 同一份内容可能从 typed definition 或从 `Value`(追加、HashEdit 的
+/// new_content)两条路径写入;哈希同时是存储地址与编辑锚点,两条路径必须
+/// 得到同一串字节,否则锚点会无声错位。经 Value 即得排序键的规范形态。
+pub fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, CoreError> {
+    Ok(serde_json::to_vec(&serde_json::to_value(value)?)?)
+}
+
+/// 某个可编辑单元的内容哈希——即它的 HashEdit 锚点。
+///
+/// 调用方(UI、runner)据此指向要修订的单元,不需要也不应该自己拼哈希。
+pub fn content_hash<T: Serialize>(value: &T) -> Result<ChunkHash, CoreError> {
+    Ok(chunk_hash(&canonical_bytes(value)?))
 }
 
 /// 修订清单:标量骨架 + 命名 chunk 列表。
@@ -99,7 +118,7 @@ pub fn split_items<T: Serialize>(
     let mut hashes = Vec::with_capacity(items.len());
     let mut payloads = Vec::new();
     for item in items {
-        let bytes = serde_json::to_vec(item)?;
+        let bytes = canonical_bytes(item)?;
         let hash = chunk_hash(&bytes);
         hashes.push(hash.clone());
         payloads.push(ChunkPayload { hash, bytes });
@@ -132,5 +151,33 @@ impl Manifest {
     /// manifest 引用的全部 chunk 哈希(装载与 GC 的依据)。
     pub fn referenced_chunks(&self) -> impl Iterator<Item = &ChunkHash> {
         self.chunk_lists.values().flatten()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Serialize)]
+    struct Unit {
+        /// 声明序与字典序不同,足以暴露非规范化写入。
+        zeta: u8,
+        alpha: &'static str,
+    }
+
+    /// 哈希是存储地址、编辑锚点与并发校验的共同基础:typed 与 Value 两条
+    /// 写入路径必须同字节,且字节形态不随依赖特性漂移(serde_json 的
+    /// `preserve_order` 一旦被传递启用,这里会先失败而不是让既有锚点集体
+    /// 失效)。
+    #[test]
+    fn content_hash_is_canonical_across_write_paths() {
+        let unit = Unit {
+            zeta: 1,
+            alpha: "a",
+        };
+        let typed = canonical_bytes(&unit).unwrap();
+        let via_value = canonical_bytes(&serde_json::to_value(&unit).unwrap()).unwrap();
+        assert_eq!(typed, via_value);
+        assert_eq!(typed, br#"{"alpha":"a","zeta":1}"#);
     }
 }

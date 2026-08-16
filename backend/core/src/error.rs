@@ -89,6 +89,18 @@ pub enum CoreError {
 
     #[error("invalid pipeline definition: {reason}")]
     InvalidPipeline { reason: String },
+
+    #[error("hash edit anchor {hash} is stale: {reason}")]
+    HashEditStale { hash: String, reason: String },
+
+    #[error("hash edit anchor {hash} is ambiguous: {reason}")]
+    HashEditAmbiguous { hash: String, reason: String },
+
+    #[error("run {0} not found")]
+    RunNotFound(i32),
+
+    #[error("invalid binding for slot {slot}: {reason}")]
+    InvalidRunBinding { slot: String, reason: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -181,6 +193,16 @@ impl CoreError {
             Self::InvalidPipeline { reason } => {
                 (ErrorCode::InvalidData, Some(json!({ "reason": reason })))
             }
+            Self::RunNotFound(id) => (ErrorCode::AssetNotFound, Some(json!({ "run_id": id }))),
+            Self::InvalidRunBinding { slot, reason } => (
+                ErrorCode::InvalidData,
+                Some(json!({ "slot": slot, "reason": reason })),
+            ),
+            // 锚点失配是调用方重读后可重试的冲突,不是数据损坏。
+            Self::HashEditStale { hash, reason } | Self::HashEditAmbiguous { hash, reason } => (
+                ErrorCode::Conflict,
+                Some(json!({ "hash": hash, "reason": reason })),
+            ),
         };
         ApiError { code, details }
     }
