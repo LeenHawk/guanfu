@@ -41,7 +41,7 @@ pub fn encode(request: &GenerateRequest, target: OperationKey) -> Result<WireReq
         ContentGenerationKind::GeminiGenerateContent => gemini::encode_request(request, target)?,
         ContentGenerationKind::OpenAiChatCompletions => chat::encode_request(request, target)?,
         ContentGenerationKind::OpenAiResponses => {
-            let mut value = request::encode_request(request)?;
+            let mut value = request::encode_request(request, target)?;
             options::apply(request, target, &mut value)?;
             value
         }

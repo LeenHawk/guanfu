@@ -5,7 +5,10 @@ use super::*;
 use crate::llm::ir::generation::*;
 use crate::llm::ir::{FileId, MediaSource};
 
-pub(super) fn encode_request(request: &GenerateRequest) -> Result<Value, CoreError> {
+pub(super) fn encode_request(
+    request: &GenerateRequest,
+    target: OperationKey,
+) -> Result<Value, CoreError> {
     let mut body = Map::new();
     body.insert("model".into(), json!(request.model.0));
     body.insert(
@@ -38,17 +41,19 @@ pub(super) fn encode_request(request: &GenerateRequest) -> Result<Value, CoreErr
         request.limits.max_output_tokens,
     );
     insert_option(&mut body, "max_tool_calls", request.limits.max_tool_calls);
-    if !request.modalities.is_empty() {
-        body.insert(
-            "modalities".into(),
-            Value::Array(
-                request
-                    .modalities
-                    .iter()
-                    .map(|modality| Value::String(snake(modality)))
-                    .collect(),
-            ),
-        );
+    // Responses 线协议没有 modalities 参数:纯文本是缺省不发,
+    // 非文本模态无落点,route incompatible 参与回退。
+    let unsupported_modalities = request
+        .modalities
+        .iter()
+        .filter(|modality| **modality != OutputModality::Text)
+        .map(|modality| format!("modalities.{}", snake(modality)))
+        .collect::<Vec<_>>();
+    if !unsupported_modalities.is_empty() {
+        return Err(CoreError::IncompatibleRoute {
+            target,
+            fields: unsupported_modalities,
+        });
     }
     if request.mode == GenerateMode::Stream {
         body.insert("stream".into(), Value::Bool(true));
