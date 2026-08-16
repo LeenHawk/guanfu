@@ -67,6 +67,25 @@ pub enum CoreError {
 
     #[error("generation failed: {0:?}")]
     OperationFailed(crate::llm::ir::OperationFailure),
+
+    #[error("asset {0} not found")]
+    AssetNotFound(i32),
+
+    #[error("asset {id} revision {revision} not found")]
+    AssetRevisionNotFound { id: i32, revision: i32 },
+
+    #[error("asset {id} expected kind {expected:?}, found {found:?}")]
+    AssetKindMismatch {
+        id: i32,
+        expected: crate::entities::asset::AssetKind,
+        found: crate::entities::asset::AssetKind,
+    },
+
+    #[error("asset {id} head moved past expected revision {expected}")]
+    AssetRevisionConflict { id: i32, expected: i32 },
+
+    #[error("chunk {0} referenced by manifest is missing")]
+    ChunkMissing(String),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -81,6 +100,8 @@ pub enum ErrorCode {
     UnsupportedRoute,
     UnsupportedCapability,
     UpstreamRejected,
+    AssetNotFound,
+    Conflict,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -136,6 +157,24 @@ impl CoreError {
                     "retryable": failure.retryable,
                 })),
             ),
+            Self::AssetNotFound(id) => (ErrorCode::AssetNotFound, Some(json!({ "id": id }))),
+            Self::AssetRevisionNotFound { id, revision } => (
+                ErrorCode::AssetNotFound,
+                Some(json!({ "id": id, "revision": revision })),
+            ),
+            Self::AssetKindMismatch {
+                id,
+                expected,
+                found,
+            } => (
+                ErrorCode::InvalidData,
+                Some(json!({ "id": id, "expected": expected, "found": found })),
+            ),
+            Self::AssetRevisionConflict { id, expected } => (
+                ErrorCode::Conflict,
+                Some(json!({ "id": id, "expected": expected })),
+            ),
+            Self::ChunkMissing(hash) => (ErrorCode::Database, Some(json!({ "chunk": hash }))),
         };
         ApiError { code, details }
     }

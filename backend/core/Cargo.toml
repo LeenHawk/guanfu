@@ -11,6 +11,7 @@ sea-orm = { version = "2", default-features = false, features = [
   "entity-registry",
   "schema-sync",
   "with-time",
+  "with-json",
 ] }
 gproxy-protocol = "2.8"
 gproxy-transform = "2.8"
@@ -33,6 +34,8 @@ http = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 eventsource-stream = "0.2"
 tracing = "0.1"
+sha2 = "0.10"
+hex = "0.4"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 tokio = { version = "1", default-features = false, features = ["time"] }

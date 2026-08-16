@@ -7,6 +7,7 @@
 //! - [`db`]：数据库连接与 schema 同步
 
 mod app;
+pub mod assets;
 mod db;
 pub mod entities;
 pub mod error;
