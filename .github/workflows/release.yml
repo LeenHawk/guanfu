@@ -18,6 +18,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# 默认的 GITHUB_TOKEN 只读,建 release 和传产物都要写权限。
+permissions:
+  contents: write
+
 jobs:
   # 先跑门禁:六个平台的构建很贵,别让一个 clippy 警告白烧半小时。
   gate:
