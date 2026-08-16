@@ -308,3 +308,74 @@ fn to_millis(at: OffsetDateTime) -> i64 {
 fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn db() -> sea_orm::DatabaseConnection {
+        let db = crate::db::connect("sqlite::memory:").await.unwrap();
+        crate::db::sync_schema(&db).await.unwrap();
+        db
+    }
+
+    /// 桌面壳每条命令都会取一次本地账号;不幂等就会每次建新用户,
+    /// 之前建的资产在下一次调用里全部变成"别人的"而消失。
+    #[tokio::test]
+    async fn local_actor_is_stable_across_calls() {
+        let db = db().await;
+        let first = AuthService::local_actor(&db).await.unwrap();
+        let second = AuthService::local_actor(&db).await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(AuthService::list_users(&db).await.unwrap().len(), 1);
+        assert!(first.is_admin);
+        // 本地账号不该让服务端进入"未初始化"状态。
+        assert!(!AuthService::needs_setup(&db).await.unwrap());
+    }
+
+    /// 首个账号即管理员,之后必须由管理员建号;口令与令牌都不可回读。
+    #[tokio::test]
+    async fn registration_and_sessions_follow_the_stated_rules() {
+        let db = db().await;
+        let admin = Credentials {
+            name: "alice".into(),
+            password: "alicepass123".into(),
+        };
+        let created = AuthService::register(&db, None, &admin, false)
+            .await
+            .unwrap();
+        assert!(created.is_admin, "the first account is the administrator");
+
+        let other = Credentials {
+            name: "mallory".into(),
+            password: "mallorypass1".into(),
+        };
+        assert!(matches!(
+            AuthService::register(&db, None, &other, false).await,
+            Err(CoreError::Forbidden { .. })
+        ));
+
+        let session = AuthService::login(&db, &admin).await.unwrap();
+        let (actor, _) = AuthService::actor_for(&db, &session.token).await.unwrap();
+        assert!(actor.is_admin);
+        AuthService::register(&db, Some(actor), &other, false)
+            .await
+            .expect("an administrator can create accounts");
+
+        // 口令错误与账号不存在返回同一个错误,不泄露账号是否存在。
+        let wrong = Credentials {
+            name: "alice".into(),
+            password: "not the password".into(),
+        };
+        let missing = Credentials {
+            name: "nobody".into(),
+            password: "not the password".into(),
+        };
+        let a = AuthService::login(&db, &wrong).await.unwrap_err();
+        let b = AuthService::login(&db, &missing).await.unwrap_err();
+        assert_eq!(a.api_error().code as u8, b.api_error().code as u8);
+
+        AuthService::logout(&db, &session.token).await.unwrap();
+        assert!(AuthService::actor_for(&db, &session.token).await.is_err());
+    }
+}

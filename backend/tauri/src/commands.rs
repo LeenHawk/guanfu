@@ -246,6 +246,22 @@ pub async fn import_character(
     .map_err(api_error)
 }
 
+/// 共享 / 取消共享一个资产。
+///
+/// 桌面壳只有本地账号,共享在这里等于"标记为不归属任何人";
+/// 同一份资产带到服务端时,所有账号都能看到。
+#[tauri::command]
+pub async fn set_asset_shared(
+    state: State<'_, AppState>,
+    id: i32,
+    shared: bool,
+) -> Result<AssetHeadDto, ApiError> {
+    let actor = local_actor(&state).await?;
+    AssetService::set_shared(&state.db, actor, id, shared)
+        .await
+        .map_err(api_error)
+}
+
 #[tauri::command]
 pub async fn bootstrap_chat(state: State<'_, AppState>) -> Result<ChatBootstrap, ApiError> {
     let actor = local_actor(&state).await?;

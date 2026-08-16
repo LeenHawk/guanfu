@@ -55,6 +55,7 @@ pub fn run() {
             commands::cancel_llm,
             commands::list_assets,
             commands::delete_asset,
+            commands::set_asset_shared,
             commands::import_character,
             commands::bootstrap_chat,
             commands::create_chat_history,

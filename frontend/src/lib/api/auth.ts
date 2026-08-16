@@ -3,7 +3,12 @@ import type { Credentials } from "$lib/bindings/Credentials";
 import type { SessionDto } from "$lib/bindings/SessionDto";
 import type { SessionSummary } from "$lib/bindings/SessionSummary";
 import type { UserDto } from "$lib/bindings/UserDto";
-import { isTauri, requestJson, setAuthToken } from "$lib/api/transport";
+import {
+  invokeCommand,
+  isTauri,
+  requestJson,
+  setAuthToken,
+} from "$lib/api/transport";
 
 /** 服务端是否还没有任何账号——决定显示"创建管理员"还是"登录"。 */
 export interface AuthStatus {
@@ -55,10 +60,12 @@ export const authApi = {
 
   listUsers: (): Promise<UserDto[]> => requestJson("/api/users"),
 
-  /** 共享 / 取消共享一个资产。 */
+  /** 共享 / 取消共享一个资产;聊天页两壳都会用到。 */
   setShared: (id: number, shared: boolean): Promise<AssetHeadDto> =>
-    requestJson(`/api/assets/${id}/share`, {
-      method: "PUT",
-      body: JSON.stringify({ shared }),
-    }),
+    isTauri()
+      ? invokeCommand("set_asset_shared", { id, shared })
+      : requestJson(`/api/assets/${id}/share`, {
+          method: "PUT",
+          body: JSON.stringify({ shared }),
+        }),
 };
