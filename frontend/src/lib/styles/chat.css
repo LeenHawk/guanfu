@@ -184,6 +184,12 @@
   display: grid;
   gap: 6px;
 }
+.media-placeholder {
+  /* 与图片同宽高比,避免取到图时格位跳动 */
+  aspect-ratio: 1;
+  border: 1px dashed var(--color-line);
+  border-radius: 10px;
+}
 .media-gallery img {
   width: 100%;
   border: 1px solid var(--color-line);
@@ -217,4 +223,18 @@
 }
 .share-toggle {
   font-size: 12px;
+}
+
+.session-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.account-area {
+  width: min(100%, 1040px);
+  margin-inline: auto;
+  padding: 0 clamp(28px, 5vw, 72px) 60px;
+}
+
+.load-earlier {
+  align-self: center;
 }
