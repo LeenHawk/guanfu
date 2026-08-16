@@ -74,6 +74,11 @@ impl RunnerService {
     /// 执行一次聊天 run,返回事件流。
     ///
     /// 事件流被消费完毕时,当轮已经提交或已记为失败。
+    #[tracing::instrument(skip(db, llm, store, request), fields(
+        pipeline = request.pipeline_asset_id,
+        channel_id = request.channel_id,
+        run_id = tracing::field::Empty,
+    ))]
     pub async fn run_chat(
         db: DatabaseConnection,
         llm: std::sync::Arc<LlmService>,
@@ -92,6 +97,7 @@ impl RunnerService {
                 reason: "chat runs need a history slot".to_owned(),
             })?;
         let run = RunService::start(&db, request.pipeline_asset_id, &inputs).await?;
+        tracing::Span::current().record("run_id", run.id);
         let snapshot = snapshot::load_snapshot(&db, &inputs, &request, run.id).await?;
 
         let (progress, mut incoming) = tokio::sync::mpsc::unbounded_channel();

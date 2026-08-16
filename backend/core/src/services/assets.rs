@@ -109,6 +109,7 @@ impl AssetService {
     }
 
     /// 以 CAS 提交新修订:`expected_head` 不匹配即冲突,由调用方重读重试。
+    #[tracing::instrument(skip(db, definition), fields(kind = ?D::KIND))]
     pub async fn commit<D: AssetDefinition>(
         db: &impl ConnectionTrait,
         id: i32,
@@ -137,6 +138,7 @@ impl AssetService {
     /// 追加:新增 chunk + 新 manifest,不重写既有单元。
     ///
     /// 每轮聊天就是这条路径——写入量与新增内容成正比,与历史长度无关。
+    #[tracing::instrument(skip(db, units), fields(count = units.len()))]
     pub async fn append_units(
         db: &impl ConnectionTrait,
         id: i32,
@@ -157,6 +159,7 @@ impl AssetService {
     }
 
     /// 修订:以 HashEdit 锚定内容而非下标,一批指令原子生效。
+    #[tracing::instrument(skip(db, edits), fields(count = edits.len()))]
     pub async fn revise_units(
         db: &impl ConnectionTrait,
         id: i32,

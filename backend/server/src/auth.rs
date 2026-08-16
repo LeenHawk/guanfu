@@ -23,7 +23,10 @@ pub fn from_env() -> Option<Token> {
 }
 
 /// 未配置令牌时,拒绝对外监听——否则等于把上游密钥开放给整个网络。
-pub fn guard_public_bind(address: &std::net::SocketAddr, token: &Option<Token>) -> Result<(), String> {
+pub fn guard_public_bind(
+    address: &std::net::SocketAddr,
+    token: &Option<Token>,
+) -> Result<(), String> {
     if token.is_some() || address.ip().is_loopback() {
         return Ok(());
     }

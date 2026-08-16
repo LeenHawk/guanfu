@@ -61,7 +61,7 @@ impl LlmService {
         }
     }
 
-    #[tracing::instrument(skip(self, db, request), fields(channel_id))]
+    #[tracing::instrument(skip(self, db, request), fields(operation = ?request.operation()))]
     pub async fn execute(
         &self,
         db: &impl ConnectionTrait,

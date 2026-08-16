@@ -34,6 +34,7 @@ pub struct MediaResult {
 pub struct MediaService;
 
 impl MediaService {
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn generate_image(
         db: &impl ConnectionTrait,
         llm: &LlmService,
@@ -52,6 +53,7 @@ impl MediaService {
         save_images(db, store, name, response).await
     }
 
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn edit_image(
         db: &impl ConnectionTrait,
         llm: &LlmService,
@@ -70,6 +72,7 @@ impl MediaService {
         save_images(db, store, name, response).await
     }
 
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn speech(
         db: &impl ConnectionTrait,
         llm: &LlmService,
@@ -99,6 +102,7 @@ impl MediaService {
         .await
     }
 
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn transcribe(
         db: &impl ConnectionTrait,
         llm: &LlmService,
@@ -121,6 +125,7 @@ impl MediaService {
     }
 
     /// 创建视频任务;异步语义,返回排队中的任务。
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn create_video(
         db: &impl ConnectionTrait,
         llm: &LlmService,
@@ -137,6 +142,7 @@ impl MediaService {
     }
 
     /// 轮询视频任务状态。
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn poll_video(
         db: &impl ConnectionTrait,
         llm: &LlmService,
@@ -153,6 +159,7 @@ impl MediaService {
     }
 
     /// 下载已完成任务的视频内容并落成 Media Asset。
+    #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn download_video(
         db: &impl ConnectionTrait,
         llm: &LlmService,

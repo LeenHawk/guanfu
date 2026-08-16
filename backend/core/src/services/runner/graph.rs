@@ -77,12 +77,16 @@ pub async fn execute(
     Ok(values)
 }
 
+/// 节点产出:`(节点 id, [(端口名, 值)])`。
+type NodeOutput = (String, Vec<(&'static str, PortValue)>);
+
+#[tracing::instrument(skip(ctx, pipeline, values), fields(node = node.id))]
 async fn run_node(
     ctx: &GraphContext,
     pipeline: &PipelineV1,
     node: &Node,
     values: &BTreeMap<String, PortValue>,
-) -> Result<(String, Vec<(&'static str, PortValue)>), CoreError> {
+) -> Result<NodeOutput, CoreError> {
     let produced = match &node.kind {
         NodeKind::ContextBuild { .. } => vec![(
             "prompt",

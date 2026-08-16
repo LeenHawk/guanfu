@@ -3,6 +3,7 @@
 //! 通用 `/api/llm` 只承载请求/响应,双工会话需要独立端点:浏览器连上来后
 //! 先发一条会话配置,服务端据此建立上游连接,之后两个方向各自泵事件。
 
+use crate::routes::RealtimeState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
@@ -14,7 +15,6 @@ use guanfu_core::services::llm::SemanticLlmOutput;
 use guanfu_core::services::realtime::{
     RealtimeDownstream as Downstream, RealtimeHandshake as Handshake,
 };
-use crate::routes::RealtimeState;
 pub async fn handler(upgrade: WebSocketUpgrade, State(state): State<RealtimeState>) -> Response {
     upgrade.on_upgrade(move |socket| session(socket, state))
 }
@@ -49,8 +49,7 @@ async fn session(socket: WebSocket, realtime: RealtimeState) {
             let _ = send_down(
                 &mut client_tx,
                 Downstream::Error {
-                    error: guanfu_core::CoreError::WebSocket("unauthorized".to_owned())
-                        .api_error(),
+                    error: guanfu_core::CoreError::WebSocket("unauthorized".to_owned()).api_error(),
                 },
             )
             .await;
