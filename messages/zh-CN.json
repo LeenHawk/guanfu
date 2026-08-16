@@ -159,5 +159,6 @@
   "session_created": "登录于",
   "session_expires": "到期",
   "no_other_sessions": "没有其他设备的会话",
-  "load_earlier": "还有 {count} 条更早的消息,点击展开"
+  "load_earlier": "还有 {count} 条更早的消息,点击展开",
+  "account_local_only": "桌面版是本地单用户,不需要登录会话"
 }

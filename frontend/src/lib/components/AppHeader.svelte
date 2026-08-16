@@ -51,6 +51,10 @@
         >{m.nav_studio()}</a
       >
       <a
+        href={resolve("/account")}
+        class:active={page.url.pathname.startsWith("/account")}>{m.account()}</a
+      >
+      <a
         href={resolve("/channels")}
         class:active={page.url.pathname.startsWith("/channels")}
         >{m.nav_channels()}</a

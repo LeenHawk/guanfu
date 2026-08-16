@@ -229,12 +229,6 @@
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.account-area {
-  width: min(100%, 1040px);
-  margin-inline: auto;
-  padding: 0 clamp(28px, 5vw, 72px) 60px;
-}
-
 .load-earlier {
   align-self: center;
 }

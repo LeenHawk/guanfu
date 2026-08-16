@@ -159,5 +159,6 @@
   "session_created": "Signed in",
   "session_expires": "Expires",
   "no_other_sessions": "No sessions on other devices",
-  "load_earlier": "Load {count} earlier messages"
+  "load_earlier": "Load {count} earlier messages",
+  "account_local_only": "The desktop app runs locally for one user and has no sessions"
 }
