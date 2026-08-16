@@ -658,3 +658,73 @@ async fn preserves_stream_tool_call_finish_reason() {
         )))
     )));
 }
+
+/// Responses 的 input 里,助手消息的文本必须是 `output_text`;
+/// 发 `input_text` 会被上游 400 拒掉。多轮对话每一轮都会走到这条,
+/// 单轮请求永远碰不到,所以它值得单独钉住。
+#[test]
+fn replayed_assistant_turns_use_output_text() {
+    let mut request = request(GenerateMode::Complete);
+    request.input.push(InputItem::Message {
+        message: Message {
+            role: MessageRole::Assistant,
+            content: vec![InputContent::Text {
+                text: "earlier reply".into(),
+            }],
+        },
+    });
+    request.input.push(InputItem::Message {
+        message: Message {
+            role: MessageRole::User,
+            content: vec![InputContent::Text {
+                text: "follow up".into(),
+            }],
+        },
+    });
+
+    let target = OperationKey::content_generation(
+        Operation::GenerateContent,
+        ContentGenerationKind::OpenAiResponses,
+    );
+    let RequestBody::Json(body) = encode(&request, target).unwrap().body else {
+        panic!("responses encodes a json body");
+    };
+    let value: Value = body.decode().unwrap();
+    let input = value["input"].as_array().unwrap();
+    let kinds: Vec<(&str, &str)> = input
+        .iter()
+        .map(|item| {
+            (
+                item["role"].as_str().unwrap(),
+                item["content"][0]["type"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("user", "input_text"),
+            ("assistant", "output_text"),
+            ("user", "input_text"),
+        ]
+    );
+
+    // 助手消息带非文本内容:Responses 的助手侧只有 output_text / refusal,
+    // IR 却容得下这种组合。显式报不兼容让路由回退,而不是发出去等 400。
+    let mut illegal = super::tests::request(GenerateMode::Complete);
+    illegal.input.push(InputItem::Message {
+        message: Message {
+            role: MessageRole::Assistant,
+            content: vec![InputContent::Image {
+                source: crate::llm::ir::MediaSource::Url {
+                    url: "https://example.invalid/a.png".into(),
+                },
+                detail: ImageDetail::Auto,
+            }],
+        },
+    });
+    assert!(matches!(
+        encode(&illegal, target),
+        Err(crate::CoreError::IncompatibleRoute { .. })
+    ));
+}

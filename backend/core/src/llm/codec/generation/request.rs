@@ -13,7 +13,7 @@ pub(super) fn encode_request(
     body.insert("model".into(), json!(request.model.0));
     body.insert(
         "input".into(),
-        encode_input(&request.instructions, &request.input)?,
+        encode_input(&request.instructions, &request.input, target)?,
     );
     if !request.tools.is_empty() {
         body.insert(
@@ -64,6 +64,7 @@ pub(super) fn encode_request(
 pub(in crate::llm::codec) fn encode_input(
     instructions: &[Instruction],
     input: &[InputItem],
+    target: OperationKey,
 ) -> Result<Value, CoreError> {
     let mut values = instructions
         .iter()
@@ -74,7 +75,7 @@ pub(in crate::llm::codec) fn encode_input(
                     InstructionRole::System => "system",
                     InstructionRole::Developer => "developer",
                 },
-                "content": encode_content(&instruction.content)?,
+                "content": encode_content(&instruction.content, false, target)?,
             }))
         })
         .collect::<Result<Vec<_>, CoreError>>()?;
@@ -89,7 +90,11 @@ pub(in crate::llm::codec) fn encode_input(
                         MessageRole::User => "user",
                         MessageRole::Assistant => "assistant",
                     },
-                    "content": encode_content(&message.content)?,
+                    "content": encode_content(
+                        &message.content,
+                        message.role == MessageRole::Assistant,
+                        target,
+                    )?,
                 })),
                 InputItem::ToolResult { result } => encode_tool_result(result),
                 InputItem::McpApproval { approval } => Ok(json!({
@@ -144,12 +149,46 @@ fn encode_reasoning_input(reasoning: &ReasoningInput) -> Value {
     Value::Object(item)
 }
 
-fn encode_content(content: &[InputContent]) -> Result<Value, CoreError> {
+/// `assistant` 为真时走助手侧的内容类型。
+///
+/// Responses 的 input 数组按角色分两套内容词汇:用户侧是
+/// `input_text` / `input_image` / `input_file` / `input_audio`,助手侧只有
+/// `output_text` 与 `refusal`。文本按角色改类型;非文本内容在助手消息上
+/// 无从表达(助手不会"输入"一张图),IR 却容得下这种组合,所以显式报
+/// 不兼容让路由回退,而不是发一个注定被上游拒掉的请求。
+fn encode_content(
+    content: &[InputContent],
+    assistant: bool,
+    target: OperationKey,
+) -> Result<Value, CoreError> {
+    if assistant {
+        let unencodable: Vec<String> = content
+            .iter()
+            .filter_map(|part| match part {
+                InputContent::Text { .. } => None,
+                InputContent::Image { .. } => Some("assistant.content.image"),
+                InputContent::Audio { .. } => Some("assistant.content.audio"),
+                InputContent::File { .. } => Some("assistant.content.file"),
+            })
+            .map(str::to_owned)
+            .collect();
+        if !unencodable.is_empty() {
+            return Err(CoreError::IncompatibleRoute {
+                target,
+                fields: unencodable,
+            });
+        }
+    }
+    let text_type = if assistant {
+        "output_text"
+    } else {
+        "input_text"
+    };
     Ok(Value::Array(
         content
             .iter()
             .map(|part| match part {
-                InputContent::Text { text } => Ok(json!({"type":"input_text","text":text})),
+                InputContent::Text { text } => Ok(json!({"type":text_type,"text":text})),
                 InputContent::Image { source, detail } => {
                     let (field, value) = encode_media_ref(source)?;
                     Ok(json!({"type":"input_image",field:value,"detail":snake(detail)}))

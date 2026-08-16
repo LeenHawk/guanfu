@@ -44,6 +44,7 @@ pub(super) fn canonical_request(
                     crate::llm::codec::generation::request::encode_input(
                         &input.instructions,
                         &input.input,
+                        key,
                     )?
                 }
             };
@@ -168,14 +169,14 @@ pub(super) fn canonical_request(
         }
         OperationRequest::Platform(PlatformRequest::Compact(request)) => (
             json_body(
-                json!({"model":request.model.0,"input":crate::llm::codec::generation::request::encode_input(&request.instructions,&request.input)?,"max_output_tokens":request.max_output_tokens}),
+                json!({"model":request.model.0,"input":crate::llm::codec::generation::request::encode_input(&request.instructions,&request.input,key)?,"max_output_tokens":request.max_output_tokens}),
             )?,
             Vec::new(),
             ResponseMode::Json,
         ),
         OperationRequest::Platform(PlatformRequest::CreateConversation(request)) => (
             json_body(
-                json!({"items":crate::llm::codec::generation::request::encode_input(&[],&request.items)?,"metadata":request.metadata}),
+                json!({"items":crate::llm::codec::generation::request::encode_input(&[],&request.items,key)?,"metadata":request.metadata}),
             )?,
             Vec::new(),
             ResponseMode::Json,
