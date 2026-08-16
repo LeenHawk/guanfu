@@ -171,8 +171,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # gen/android 不入库,每次由 CLI 生成,免得平台脚手架和源码一起漂。
       - run: pnpm tauri android init --ci
-      # staging 出 debug 包:release 包必须签名,而签名密钥要等正式发布再配。
-      - run: pnpm tauri android build --apk --debug
+      # 按 ABI 拆包:universal 包要装下四份 Rust 产物,debug 更是不剥符号,
+      # 之前那个包 1.5 GB,谁也装不了。
+      - run: pnpm tauri android build --apk --split-per-abi
+      - name: 签名 APK
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          out=backend/tauri/gen/android/app/build/outputs/apk
+          if [ -z "${KEYSTORE:-}" ]; then
+            echo "仓库没配 ANDROID_KEYSTORE,APK 保持未签名——未签名的包装不上,只能用来看产物。"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/guanfu.jks"
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          find "$out" -name '*-unsigned.apk' | while read -r apk; do
+            "$tools/zipalign" -p -f 4 "$apk" "$apk.aligned"
+            "$tools/apksigner" sign --ks "$RUNNER_TEMP/guanfu.jks" \
+              --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias "$KEY_ALIAS" \
+              --key-pass env:KEY_PASSWORD \
+              --out "${apk%-unsigned.apk}.apk" "$apk.aligned"
+            rm "$apk" "$apk.aligned"
+          done
+          rm "$RUNNER_TEMP/guanfu.jks"
       - name: 上传 APK
         uses: actions/github-script@v7
         env:
@@ -192,12 +217,21 @@ jobs:
             };
             walk(root);
             if (found.length === 0) throw new Error("没有产出 APK");
+            // gradle 出的是 app-arm64-v8a-release.apk 这种内部名字,对下载的人
+            // 没有意义,统一改成和桌面产物一致的 guanfu_<版本>_<ABI> 形式。
+            const { version } = JSON.parse(
+              fs.readFileSync("backend/tauri/tauri.conf.json", "utf8"),
+            );
             for (const file of found) {
+              const abi = path.basename(file).match(/^app-(.+?)-release/)?.[1];
+              const unsigned = file.endsWith("-unsigned.apk") ? "-unsigned" : "";
               await github.rest.repos.uploadReleaseAsset({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 release_id: Number(process.env.RELEASE_ID),
-                name: path.basename(file),
+                name: abi
+                  ? `guanfu_${version}_${abi}${unsigned}.apk`
+                  : path.basename(file),
                 data: fs.readFileSync(file),
               });
             }
