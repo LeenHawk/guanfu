@@ -1,0 +1,215 @@
+name: release
+
+# staging 用 workflow_dispatch 手动发预发布;正式版推 v* 标签。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签"
+        required: true
+        default: staging
+      prerelease:
+        description: "标记为预发布"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 先跑门禁:六个平台的构建很贵,别让一个 clippy 警告白烧半小时。
+  gate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: cargo fmt --all --check
+        working-directory: backend
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: backend
+      - run: cargo test --workspace
+        working-directory: backend
+      - run: pnpm lint
+      - run: pnpm check
+
+  create-release:
+    needs: gate
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.draft.outputs.result }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=${{ github.event_name == 'push' && github.ref_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+      # 先建草稿:六个平台并行往同一个 release 上传,草稿状态下不会
+      # 让人看到只传了一半的发布。
+      - id: draft
+        uses: actions/github-script@v7
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        with:
+          result-encoding: string
+          script: |
+            const tag = process.env.TAG;
+            const existing = await github.rest.repos.listReleases({
+              owner: context.repo.owner, repo: context.repo.repo, per_page: 100,
+            });
+            // staging 会反复发,先清掉同名的旧发布与标签,避免堆积。
+            for (const release of existing.data.filter((r) => r.tag_name === tag)) {
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner, repo: context.repo.repo, release_id: release.id,
+              });
+            }
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: tag,
+              body: "构建中…",
+              draft: true,
+              prerelease: ${{ github.event_name == 'push' && 'false' || 'true' }},
+              target_commitish: context.sha,
+            });
+            return data.id;
+
+  desktop:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, label: linux-x64 }
+          - { runner: ubuntu-22.04-arm, label: linux-arm64 }
+          - { runner: windows-latest, label: windows-x64 }
+          - { runner: windows-11-arm, label: windows-arm64 }
+          - { runner: macos-13, label: macos-x64 }
+          - { runner: macos-14, label: macos-arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          key: ${{ matrix.label }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 安装 Linux 构建依赖
+        if: startsWith(matrix.runner, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tauriScript: pnpm tauri
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+
+  android:
+    needs: create-release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: 安装 NDK
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          key: android
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # gen/android 不入库,每次由 CLI 生成,免得平台脚手架和源码一起漂。
+      - run: pnpm tauri android init --ci
+      # staging 出 debug 包:release 包必须签名,而签名密钥要等正式发布再配。
+      - run: pnpm tauri android build --apk --debug
+      - name: 上传 APK
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const root = "backend/tauri/gen/android/app/build/outputs/apk";
+            const found = [];
+            const walk = (dir) => {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) walk(full);
+                else if (entry.name.endsWith(".apk")) found.push(full);
+              }
+            };
+            walk(root);
+            if (found.length === 0) throw new Error("没有产出 APK");
+            for (const file of found) {
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: Number(process.env.RELEASE_ID),
+                name: path.basename(file),
+                data: fs.readFileSync(file),
+              });
+            }
+
+  publish:
+    needs: [create-release, desktop, android]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false,
+              body: [
+                "桌面端:Linux / Windows / macOS,各含 x64 与 arm64。",
+                "Android:debug 签名的 APK,仅供测试安装。",
+                "",
+                `提交:${context.sha}`,
+              ].join("\n"),
+            });

@@ -36,7 +36,12 @@ async fn db() -> sea_orm::DatabaseConnection {
 
 #[tokio::test]
 async fn imports_and_exports_a_sillytavern_card() {
-    let card_png = std::fs::read(CARD).expect("sample card is in the repo");
+    // samples/ 是 gitignored 的第三方样本(275 MB),干净克隆与 CI 上没有,
+    // 所以缺失时跳过而不是把整条流水线判失败。
+    let Ok(card_png) = std::fs::read(CARD) else {
+        eprintln!("SKIP: {CARD} not present");
+        return;
+    };
     // 同时含 chara 与 ccv3 时只读 chara。
     let json = png::read_card(&card_png).unwrap();
     let source = ccv2::parse_card(&json).unwrap();
