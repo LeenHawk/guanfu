@@ -72,7 +72,12 @@
 
 <div class="app-shell">
   <AppHeader />
-  {#if errorCode}<div class="error-banner" role="alert">
+  <!-- 未登录时登录弹窗已经在说同一件事;再插一条横幅既重复,
+       又会把整个布局往下推(实测这是首屏唯一的布局位移来源)。 -->
+  {#if errorCode && errorCode !== "unauthorized"}<div
+      class="error-banner"
+      role="alert"
+    >
       <span>{messageForError(errorCode)}</span>
       <button
         class="banner-close"
