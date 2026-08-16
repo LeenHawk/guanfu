@@ -46,6 +46,11 @@
         >{m.nav_chat()}</a
       >
       <a
+        href={resolve("/studio")}
+        class:active={page.url.pathname.startsWith("/studio")}
+        >{m.nav_studio()}</a
+      >
+      <a
         href={resolve("/channels")}
         class:active={page.url.pathname.startsWith("/channels")}
         >{m.nav_channels()}</a

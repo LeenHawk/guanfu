@@ -141,3 +141,54 @@
     margin-right: 4px;
   }
 }
+
+/* 创作台:标签页 + 媒体库。 */
+.studio-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+.studio-tabs .text-button {
+  padding: 10px 14px;
+  border-bottom: 2px solid transparent;
+}
+.studio-tabs .text-button.active {
+  color: var(--color-ink);
+  border-bottom-color: var(--color-cinnabar);
+}
+.studio-form {
+  align-items: end;
+}
+.studio-form .wide {
+  grid-column: 1 / -1;
+}
+.media-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.media-gallery figure {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.media-gallery img {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  object-fit: cover;
+}
+.media-gallery figcaption {
+  color: var(--color-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.media-player {
+  width: min(100%, 480px);
+  margin-top: 12px;
+}
+.realtime-status {
+  color: var(--color-muted);
+  font-size: 13px;
+}
