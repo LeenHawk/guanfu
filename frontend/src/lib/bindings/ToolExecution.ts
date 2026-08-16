@@ -4,6 +4,10 @@ import type { ToolCallId } from "./ToolCallId";
 import type { ToolExecutionState } from "./ToolExecutionState";
 import type { JsonValue } from "./serde_json/JsonValue";
 
+/**
+ * 服务端执行的托管工具（web_search / file_search / code_interpreter /
+ * image_generation / mcp 等）的调用与结果，调用方无需回传输出。
+ */
 export type ToolExecution = {
   id: OutputId;
   call_id: ToolCallId;

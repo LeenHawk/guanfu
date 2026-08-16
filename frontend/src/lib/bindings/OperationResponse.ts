@@ -7,6 +7,7 @@ import type { ImageResponse } from "./ImageResponse";
 import type { ModelResponse } from "./ModelResponse";
 import type { PlatformResponse } from "./PlatformResponse";
 import type { SearchResponse } from "./SearchResponse";
+import type { VideoResponse } from "./VideoResponse";
 
 export type OperationResponse =
   | { operation: "models"; response: ModelResponse }
@@ -16,4 +17,5 @@ export type OperationResponse =
   | { operation: "images"; response: ImageResponse }
   | { operation: "audio"; response: AudioResponse }
   | { operation: "search"; response: SearchResponse }
+  | { operation: "video"; response: VideoResponse }
   | { operation: "platform"; response: PlatformResponse };

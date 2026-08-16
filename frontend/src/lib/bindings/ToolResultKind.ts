@@ -7,6 +7,5 @@ export type ToolResultKind =
   | "code_execution"
   | "shell"
   | "text_editor"
-  | "mcp"
   | "memory"
   | "tool_search";

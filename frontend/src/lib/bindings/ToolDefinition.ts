@@ -6,7 +6,6 @@ import type { FileSearchTool } from "./FileSearchTool";
 import type { FunctionTool } from "./FunctionTool";
 import type { ImageGenerationTool } from "./ImageGenerationTool";
 import type { McpTool } from "./McpTool";
-import type { MemoryTool } from "./MemoryTool";
 import type { ShellTool } from "./ShellTool";
 import type { TextEditorTool } from "./TextEditorTool";
 import type { ToolSearchTool } from "./ToolSearchTool";
@@ -25,5 +24,5 @@ export type ToolDefinition =
   | ({ type: "text_editor" } & TextEditorTool)
   | ({ type: "image_generation" } & ImageGenerationTool)
   | ({ type: "mcp" } & McpTool)
-  | ({ type: "memory" } & MemoryTool)
+  | { type: "memory" }
   | ({ type: "tool_search" } & ToolSearchTool);

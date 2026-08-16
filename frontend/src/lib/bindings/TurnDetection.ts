@@ -2,10 +2,19 @@
 import type { SemanticVadEagerness } from "./SemanticVadEagerness";
 
 export type TurnDetection =
+  | { type: "off" }
   | {
       type: "server_vad";
       threshold: number | null;
       prefix_padding_ms: number | null;
       silence_duration_ms: number | null;
+      idle_timeout_ms: number | null;
+      create_response: boolean | null;
+      interrupt_response: boolean | null;
     }
-  | { type: "semantic_vad"; eagerness: SemanticVadEagerness | null };
+  | {
+      type: "semantic_vad";
+      eagerness: SemanticVadEagerness | null;
+      create_response: boolean | null;
+      interrupt_response: boolean | null;
+    };

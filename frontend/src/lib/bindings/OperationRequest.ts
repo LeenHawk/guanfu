@@ -7,6 +7,7 @@ import type { ImageRequest } from "./ImageRequest";
 import type { ModelRequest } from "./ModelRequest";
 import type { PlatformRequest } from "./PlatformRequest";
 import type { SearchRequest } from "./SearchRequest";
+import type { VideoRequest } from "./VideoRequest";
 
 export type OperationRequest =
   | { operation: "models"; request: ModelRequest }
@@ -16,4 +17,5 @@ export type OperationRequest =
   | { operation: "images"; request: ImageRequest }
   | { operation: "audio"; request: AudioRequest }
   | { operation: "search"; request: SearchRequest }
+  | { operation: "video"; request: VideoRequest }
   | { operation: "platform"; request: PlatformRequest };

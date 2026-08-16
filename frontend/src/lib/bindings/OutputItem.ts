@@ -2,6 +2,7 @@
 import type { AudioArtifact } from "./AudioArtifact";
 import type { CompactionOutput } from "./CompactionOutput";
 import type { ImageArtifact } from "./ImageArtifact";
+import type { McpApprovalRequest } from "./McpApprovalRequest";
 import type { OutputMessage } from "./OutputMessage";
 import type { ReasoningOutput } from "./ReasoningOutput";
 import type { ToolCall } from "./ToolCall";
@@ -13,5 +14,6 @@ export type OutputItem =
   | { type: "compaction"; item: CompactionOutput }
   | { type: "tool_call"; item: ToolCall }
   | { type: "tool_execution"; item: ToolExecution }
+  | { type: "mcp_approval_request"; item: McpApprovalRequest }
   | { type: "image"; item: ImageArtifact }
   | { type: "audio"; item: AudioArtifact };

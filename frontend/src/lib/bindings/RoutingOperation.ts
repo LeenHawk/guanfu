@@ -15,6 +15,11 @@ export type RoutingOperation =
   | "create_transcription"
   | "create_translation"
   | "compact_content"
+  | "create_video"
+  | "retrieve_video"
+  | "list_videos"
+  | "delete_video"
+  | "download_video_content"
   | "create_conversation"
   | "create_realtime_call"
   | "connect_realtime";

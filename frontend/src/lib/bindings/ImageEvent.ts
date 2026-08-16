@@ -2,11 +2,8 @@
 import type { ImagePreview } from "./ImagePreview";
 import type { ImageProgress } from "./ImageProgress";
 import type { ImageResponse } from "./ImageResponse";
-import type { OperationFailure } from "./OperationFailure";
 
 export type ImageEvent =
-  | { type: "started" }
   | ({ type: "preview" } & ImagePreview)
   | ({ type: "progress" } & ImageProgress)
-  | ({ type: "finished" } & ImageResponse)
-  | ({ type: "failed" } & OperationFailure);
+  | ({ type: "finished" } & ImageResponse);
