@@ -86,6 +86,9 @@ pub enum CoreError {
 
     #[error("chunk {0} referenced by manifest is missing")]
     ChunkMissing(String),
+
+    #[error("invalid pipeline definition: {reason}")]
+    InvalidPipeline { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -175,6 +178,9 @@ impl CoreError {
                 Some(json!({ "id": id, "expected": expected })),
             ),
             Self::ChunkMissing(hash) => (ErrorCode::Database, Some(json!({ "chunk": hash }))),
+            Self::InvalidPipeline { reason } => {
+                (ErrorCode::InvalidData, Some(json!({ "reason": reason })))
+            }
         };
         ApiError { code, details }
     }

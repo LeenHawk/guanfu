@@ -1,8 +1,14 @@
+use guanfu_core::assets::{
+    CharacterDefinition, MediaDefinition, OpenAiChatPresetDefinition, PersonaDefinition,
+    PipelineDefinition, RegexScriptDefinition, WorldBookDefinition,
+};
+use guanfu_core::entities::asset::AssetKind;
 use guanfu_core::entities::routing_rule::{RoutingKind, RoutingOperation};
 use guanfu_core::error::{ApiError, ErrorCode};
 use guanfu_core::llm::codec::OperationEvent;
 use guanfu_core::llm::ir::realtime::{RealtimeClientEvent, RealtimeServerEvent};
 use guanfu_core::llm::ir::{OperationRequest, OperationResponse};
+use guanfu_core::services::assets::AssetHeadDto;
 use guanfu_core::services::channels::{ChannelDto, CredentialDto, NewChannel, NewCredential};
 use guanfu_core::services::llm::{SemanticLlmRequest, SemanticStreamMessage};
 use guanfu_core::services::routing::{
@@ -31,5 +37,14 @@ fn main() -> Result<(), ts_rs::ExportError> {
     RealtimeServerEvent::export_all(&config)?;
     OperationEvent::export_all(&config)?;
     SemanticStreamMessage::export_all(&config)?;
+    AssetKind::export_all(&config)?;
+    AssetHeadDto::export_all(&config)?;
+    CharacterDefinition::export_all(&config)?;
+    PersonaDefinition::export_all(&config)?;
+    WorldBookDefinition::export_all(&config)?;
+    OpenAiChatPresetDefinition::export_all(&config)?;
+    RegexScriptDefinition::export_all(&config)?;
+    PipelineDefinition::export_all(&config)?;
+    MediaDefinition::export_all(&config)?;
     Ok(())
 }

@@ -17,6 +17,24 @@ use sha2::{Digest, Sha256};
 use crate::entities::asset::AssetKind;
 use crate::CoreError;
 
+pub mod character;
+pub mod media;
+pub mod persona;
+pub mod pipeline;
+pub mod preset;
+pub mod refs;
+pub mod regex_script;
+pub mod world_book;
+
+pub use character::CharacterDefinition;
+pub use media::MediaDefinition;
+pub use persona::PersonaDefinition;
+pub use pipeline::PipelineDefinition;
+pub use preset::OpenAiChatPresetDefinition;
+pub use refs::Extra;
+pub use regex_script::RegexScriptDefinition;
+pub use world_book::WorldBookDefinition;
+
 /// 内容寻址哈希(sha256 hex)。
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS)]
 #[ts(as = "String")]

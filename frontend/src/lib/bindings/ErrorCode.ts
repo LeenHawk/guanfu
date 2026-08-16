@@ -9,4 +9,6 @@ export type ErrorCode =
   | "no_usable_credential"
   | "unsupported_route"
   | "unsupported_capability"
-  | "upstream_rejected";
+  | "upstream_rejected"
+  | "asset_not_found"
+  | "conflict";

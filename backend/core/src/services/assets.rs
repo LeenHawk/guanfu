@@ -298,58 +298,27 @@ async fn load_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{join_inline, join_items, split_inline, split_items};
+    use crate::assets::character::{CharacterDefinition, CharacterV1};
+    use crate::assets::world_book::{WorldBookDefinition, WorldBookEntry, WorldBookV1};
 
-    /// 机制测试用:一个逐项成 chunk 的 definition。
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    struct ListNote {
-        title: String,
-        entries: Vec<String>,
+    fn book(entries: &[&str]) -> WorldBookDefinition {
+        WorldBookDefinition::V1(WorldBookV1 {
+            name: "eldoria".into(),
+            entries: entries
+                .iter()
+                .map(|content| WorldBookEntry {
+                    content: (*content).into(),
+                    enabled: true,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        })
     }
 
-    impl AssetDefinition for ListNote {
-        const KIND: AssetKind = AssetKind::WorldBook;
-
-        fn split(&self) -> Result<SplitManifest, CoreError> {
-            let (hashes, chunks) = split_items(&self.entries)?;
-            let mut manifest = Manifest {
-                fields: serde_json::json!({ "title": self.title }),
-                chunk_lists: Default::default(),
-            };
-            manifest.chunk_lists.insert("entries".into(), hashes);
-            Ok(SplitManifest { manifest, chunks })
-        }
-
-        fn join(manifest: &Manifest, chunks: &ChunkContents) -> Result<Self, CoreError> {
-            let title = manifest
-                .fields
-                .get("title")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default()
-                .to_owned();
-            Ok(Self {
-                title,
-                entries: join_items(manifest, chunks, "entries")?,
-            })
-        }
-    }
-
-    /// 机制测试用:全内联 definition。
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    struct InlineNote {
-        body: String,
-    }
-
-    impl AssetDefinition for InlineNote {
-        const KIND: AssetKind = AssetKind::Persona;
-
-        fn split(&self) -> Result<SplitManifest, CoreError> {
-            split_inline(self)
-        }
-
-        fn join(manifest: &Manifest, _: &ChunkContents) -> Result<Self, CoreError> {
-            join_inline(manifest)
-        }
+    fn entry_contents(definition: &WorldBookDefinition) -> Vec<String> {
+        let WorldBookDefinition::V1(book) = definition;
+        book.entries.iter().map(|e| e.content.clone()).collect()
     }
 
     async fn db() -> sea_orm::DatabaseConnection {
@@ -361,29 +330,28 @@ mod tests {
     #[tokio::test]
     async fn round_trip_cas_fork_and_kind_boundary() {
         let db = db().await;
-        let note = ListNote {
-            title: "t".into(),
-            entries: vec!["a".into(), "b".into()],
-        };
-        let head = AssetService::create(&db, "wb", None, &note).await.unwrap();
+        let initial = book(&["a", "b"]);
+        let head = AssetService::create(&db, "wb", None, &initial)
+            .await
+            .unwrap();
         assert_eq!(head.head_revision, 1);
 
-        let loaded: LoadedAsset<ListNote> = AssetService::load(&db, head.id).await.unwrap();
-        assert_eq!(loaded.definition, note);
+        let loaded: LoadedAsset<WorldBookDefinition> =
+            AssetService::load(&db, head.id).await.unwrap();
+        assert_eq!(loaded.definition, initial);
 
         // 追加 = 新 chunk + 新 manifest;旧修订仍可取回。
-        let mut next = loaded.definition.clone();
-        next.entries.push("c".into());
-        let head2 = AssetService::commit(&db, head.id, 1, None, &next)
+        let appended = book(&["a", "b", "c"]);
+        let head2 = AssetService::commit(&db, head.id, 1, None, &appended)
             .await
             .unwrap();
         assert_eq!(head2.head_revision, 2);
-        let old: LoadedAsset<ListNote> =
+        let old: LoadedAsset<WorldBookDefinition> =
             AssetService::load_revision(&db, head.id, 1).await.unwrap();
-        assert_eq!(old.definition.entries.len(), 2);
+        assert_eq!(entry_contents(&old.definition), ["a", "b"]);
 
         // CAS:过期头指针显式冲突。
-        let stale = AssetService::commit(&db, head.id, 1, None, &next).await;
+        let stale = AssetService::commit(&db, head.id, 1, None, &appended).await;
         assert!(matches!(
             stale,
             Err(CoreError::AssetRevisionConflict { .. })
@@ -398,20 +366,26 @@ mod tests {
             chunks_before,
             chunk::Entity::find().all(&db).await.unwrap().len()
         );
-        let forked: LoadedAsset<ListNote> = AssetService::load(&db, fork.id).await.unwrap();
-        assert_eq!(forked.definition.entries, vec!["a", "b", "c"]);
+        let forked: LoadedAsset<WorldBookDefinition> =
+            AssetService::load(&db, fork.id).await.unwrap();
+        assert_eq!(entry_contents(&forked.definition), ["a", "b", "c"]);
 
         // kind 与 definition 不匹配 → 结构化错误。
-        let mismatch = AssetService::load::<InlineNote>(&db, head.id).await;
+        let mismatch = AssetService::load::<CharacterDefinition>(&db, head.id).await;
         assert!(matches!(mismatch, Err(CoreError::AssetKindMismatch { .. })));
 
-        // 内联 kind 零 chunk。
-        let inline = AssetService::create(&db, "p", None, &InlineNote { body: "hi".into() })
+        // 体量小的 kind 全内联:零 chunk。
+        let character = CharacterDefinition::V1(CharacterV1 {
+            name: "seraphina".into(),
+            greetings: vec!["hello".into()],
+            ..Default::default()
+        });
+        let head3 = AssetService::create(&db, "char", None, &character)
             .await
             .unwrap();
-        let inline_loaded: LoadedAsset<InlineNote> =
-            AssetService::load(&db, inline.id).await.unwrap();
-        assert_eq!(inline_loaded.definition.body, "hi");
+        let reloaded: LoadedAsset<CharacterDefinition> =
+            AssetService::load(&db, head3.id).await.unwrap();
+        assert_eq!(reloaded.definition, character);
         assert_eq!(
             chunk::Entity::find().all(&db).await.unwrap().len(),
             chunks_before
