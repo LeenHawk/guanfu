@@ -8,12 +8,20 @@ use guanfu_core::assets::refs::WorldBookRef;
 use guanfu_core::assets::world_book::WorldBookDefinition;
 use guanfu_core::exchange::{ccv2, png};
 use guanfu_core::services::assets::{AssetService, LoadedAsset};
+use guanfu_core::services::auth::Actor;
 use guanfu_core::services::exchange::ExchangeService;
 
 const CARD: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../samples/SillyTavern/default/content/default_Seraphina.png"
 );
+
+fn actor() -> Actor {
+    Actor {
+        user_id: 1,
+        is_admin: false,
+    }
+}
 
 async fn db() -> sea_orm::DatabaseConnection {
     guanfu_core::AppState::initialize(guanfu_core::AppConfig {
@@ -34,14 +42,16 @@ async fn imports_and_exports_a_sillytavern_card() {
     let source = ccv2::parse_card(&json).unwrap();
     let db = db().await;
 
-    let imported = ExchangeService::import_ccv2_json(&db, &json).await.unwrap();
+    let imported = ExchangeService::import_ccv2_json(&db, actor(), &json)
+        .await
+        .unwrap();
     let book_head = imported
         .world_book
         .expect("the sample card embeds a character book");
 
     // 内嵌世界书成为独立 Asset,并被角色引用。
     let character: LoadedAsset<CharacterDefinition> =
-        AssetService::load(&db, imported.character.id)
+        AssetService::load(&db, actor(), imported.character.id)
             .await
             .unwrap();
     let CharacterDefinition::V1(character) = &character.definition;
@@ -56,8 +66,9 @@ async fn imports_and_exports_a_sillytavern_card() {
     );
 
     // entry 顺序与内容保持。
-    let book: LoadedAsset<WorldBookDefinition> =
-        AssetService::load(&db, book_head.id).await.unwrap();
+    let book: LoadedAsset<WorldBookDefinition> = AssetService::load(&db, actor(), book_head.id)
+        .await
+        .unwrap();
     let WorldBookDefinition::V1(book) = &book.definition;
     let source_entries = &source.data.character_book.as_ref().unwrap().entries;
     assert_eq!(book.entries.len(), source_entries.len());
@@ -67,7 +78,7 @@ async fn imports_and_exports_a_sillytavern_card() {
     }
 
     // 导出:标准字段与非 V2 字段(group_only_greetings)均回到卡上。
-    let exported = ExchangeService::export_ccv2_json(&db, imported.character.id)
+    let exported = ExchangeService::export_ccv2_json(&db, actor(), imported.character.id)
         .await
         .unwrap();
     let round_tripped = ccv2::parse_card(&exported).unwrap();
@@ -98,13 +109,14 @@ async fn imports_and_exports_a_sillytavern_card() {
     );
 
     // PNG round-trip:写回底图后仍能读出同一张卡,且只留一份角色数据。
-    let exported_png = ExchangeService::export_ccv2_png(&db, imported.character.id, &card_png)
-        .await
-        .unwrap();
+    let exported_png =
+        ExchangeService::export_ccv2_png(&db, actor(), imported.character.id, &card_png)
+            .await
+            .unwrap();
     let reread = ccv2::parse_card(&png::read_card(&exported_png).unwrap()).unwrap();
     assert_eq!(reread.data.name, source.data.name);
     assert_eq!(reread.data.first_mes, source.data.first_mes);
-    let reimported = ExchangeService::import_ccv2_png(&db, &exported_png)
+    let reimported = ExchangeService::import_ccv2_png(&db, actor(), &exported_png)
         .await
         .unwrap();
     assert_ne!(reimported.character.id, imported.character.id);

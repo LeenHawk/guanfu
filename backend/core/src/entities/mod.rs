@@ -5,3 +5,5 @@ pub mod chunk;
 pub mod credential;
 pub mod routing_rule;
 pub mod run;
+pub mod session;
+pub mod user;

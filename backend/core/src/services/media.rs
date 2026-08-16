@@ -19,6 +19,7 @@ use crate::llm::ir::video::{
 };
 use crate::llm::ir::{MediaSource, OperationRequest, OperationResponse};
 use crate::services::assets::{AssetHeadDto, AssetService};
+use crate::services::auth::Actor;
 use crate::services::llm::{LlmService, SemanticLlmOutput};
 use crate::CoreError;
 
@@ -37,6 +38,7 @@ impl MediaService {
     #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn generate_image(
         db: &impl ConnectionTrait,
+        actor: Actor,
         llm: &LlmService,
         store: &Arc<dyn AssetStore>,
         channel_id: i32,
@@ -50,12 +52,13 @@ impl MediaService {
             OperationRequest::Images(ImageRequest::Generate(request)),
         )
         .await?;
-        save_images(db, store, name, response).await
+        save_images(db, actor, store, name, response).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn edit_image(
         db: &impl ConnectionTrait,
+        actor: Actor,
         llm: &LlmService,
         store: &Arc<dyn AssetStore>,
         channel_id: i32,
@@ -69,12 +72,13 @@ impl MediaService {
             OperationRequest::Images(ImageRequest::Edit(request)),
         )
         .await?;
-        save_images(db, store, name, response).await
+        save_images(db, actor, store, name, response).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn speech(
         db: &impl ConnectionTrait,
+        actor: Actor,
         llm: &LlmService,
         store: &Arc<dyn AssetStore>,
         channel_id: i32,
@@ -93,6 +97,7 @@ impl MediaService {
         };
         AssetService::create_media(
             db,
+            actor,
             store.as_ref(),
             name,
             &artifact.media_type,
@@ -162,6 +167,7 @@ impl MediaService {
     #[tracing::instrument(skip_all, fields(channel_id = channel_id))]
     pub async fn download_video(
         db: &impl ConnectionTrait,
+        actor: Actor,
         llm: &LlmService,
         store: &Arc<dyn AssetStore>,
         channel_id: i32,
@@ -182,6 +188,7 @@ impl MediaService {
         };
         AssetService::create_media(
             db,
+            actor,
             store.as_ref(),
             name,
             content.media_type.as_deref().unwrap_or("video/mp4"),
@@ -221,6 +228,7 @@ async fn job(
 
 async fn save_images(
     db: &impl ConnectionTrait,
+    actor: Actor,
     store: &Arc<dyn AssetStore>,
     name: &str,
     response: OperationResponse,
@@ -241,6 +249,7 @@ async fn save_images(
                 assets.push(
                     AssetService::create_media(
                         db,
+                        actor,
                         store.as_ref(),
                         &label,
                         &media_type.0,

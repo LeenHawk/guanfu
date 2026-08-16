@@ -11,6 +11,7 @@ use crate::assets::pipeline::{
 };
 use crate::entities::asset::AssetKind;
 use crate::services::assets::AssetService;
+use crate::services::auth::Actor;
 use crate::CoreError;
 
 use super::HISTORY_SLOT;
@@ -112,23 +113,27 @@ pub fn chat_pipeline() -> PipelineDefinition {
 }
 
 /// 取回内置模板 Asset;没有就建一个。
-pub async fn ensure_chat_pipeline(db: &impl ConnectionTrait) -> Result<i32, CoreError> {
-    let existing = AssetService::list(db, Some(AssetKind::Pipeline)).await?;
+pub async fn ensure_chat_pipeline(
+    db: &impl ConnectionTrait,
+    actor: Actor,
+) -> Result<i32, CoreError> {
+    let existing = AssetService::list(db, actor, Some(AssetKind::Pipeline)).await?;
     if let Some(head) = existing
         .into_iter()
         .find(|head| head.name == CHAT_TEMPLATE_NAME)
     {
         return Ok(head.id);
     }
-    let head = AssetService::create(db, CHAT_TEMPLATE_NAME, None, &chat_pipeline()).await?;
+    let head = AssetService::create(db, actor, CHAT_TEMPLATE_NAME, None, &chat_pipeline()).await?;
     Ok(head.id)
 }
 
 pub(super) async fn load_pipeline(
     db: &impl ConnectionTrait,
+    actor: Actor,
     id: i32,
 ) -> Result<PipelineDefinition, CoreError> {
-    Ok(AssetService::load::<PipelineDefinition>(db, id)
+    Ok(AssetService::load::<PipelineDefinition>(db, actor, id)
         .await?
         .definition)
 }

@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use crate::assets::pipeline::{InputSlot, PipelineDefinition};
 use crate::entities::asset;
 use crate::entities::run::{self, RunStatus};
+use crate::services::auth::Actor;
 use crate::CoreError;
 
 /// 发起 run 时对一个槽位的绑定。
@@ -34,6 +35,7 @@ impl RunService {
     /// 按 pipeline 的槽位签名校验绑定并钉住 revision。
     pub async fn resolve_slots(
         db: &impl ConnectionTrait,
+        actor: Actor,
         pipeline: &PipelineDefinition,
         bindings: &[SlotBinding],
     ) -> Result<Vec<ResolvedSlot>, CoreError> {
@@ -63,7 +65,7 @@ impl RunService {
                 resolved.push(ResolvedSlot {
                     slot: slot.name.clone(),
                     asset_id: *id,
-                    revision: pin_revision(db, *id, slot).await?,
+                    revision: pin_revision(db, actor, *id, slot).await?,
                 });
             }
         }
@@ -72,11 +74,13 @@ impl RunService {
 
     pub async fn start(
         db: &impl ConnectionTrait,
+        actor: Actor,
         pipeline_asset_id: i32,
         inputs: &[ResolvedSlot],
     ) -> Result<run::Model, CoreError> {
         Ok(run::ActiveModel {
             pipeline_asset_id: Set(pipeline_asset_id),
+            owner_id: Set(Some(actor.user_id)),
             status: Set(RunStatus::Running),
             inputs: Set(serde_json::to_value(inputs)?),
             outputs: Set(serde_json::json!([])),
@@ -143,23 +147,32 @@ impl RunService {
             .ok_or(CoreError::RunNotFound(run_id))
     }
 
-    pub async fn list(db: &impl ConnectionTrait) -> Result<Vec<run::Model>, CoreError> {
+    /// 只列出自己发起的 run。
+    pub async fn list(
+        db: &impl ConnectionTrait,
+        actor: Actor,
+    ) -> Result<Vec<run::Model>, CoreError> {
         use sea_orm::QueryOrder;
         Ok(run::Entity::find()
+            .filter(run::Column::OwnerId.eq(actor.user_id))
             .order_by_desc(run::Column::Id)
             .all(db)
             .await?)
     }
 }
 
+/// 绑定即读取:不可见的资产在这里就按"不存在"挡掉,
+/// 否则会从 kind 校验的错误里泄露别人私有资产的存在。
 async fn pin_revision(
     db: &impl ConnectionTrait,
+    actor: Actor,
     asset_id: i32,
     slot: &InputSlot,
 ) -> Result<i32, CoreError> {
     let head = asset::Entity::find_by_id(asset_id)
         .one(db)
         .await?
+        .filter(|head| head.owner_id.is_none_or(|owner| owner == actor.user_id))
         .ok_or(CoreError::AssetNotFound(asset_id))?;
     if head.kind != slot.kind {
         return Err(CoreError::AssetKindMismatch {

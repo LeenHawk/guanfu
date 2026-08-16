@@ -47,6 +47,8 @@ pub struct Model {
     pub id: i32,
     pub kind: AssetKind,
     pub name: String,
+    /// 归属者;`None` 表示共享给所有人。
+    pub owner_id: Option<i32>,
     pub head_revision: i32,
     pub created_at: TimeDateTimeWithTimeZone,
     pub updated_at: TimeDateTimeWithTimeZone,

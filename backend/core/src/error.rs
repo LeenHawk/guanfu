@@ -110,6 +110,12 @@ pub enum CoreError {
 
     #[error("asset store failure: {reason}")]
     AssetStore { reason: String },
+
+    #[error("invalid credentials: {reason}")]
+    InvalidCredentials { reason: String },
+
+    #[error("forbidden: {reason}")]
+    Forbidden { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -128,6 +134,7 @@ pub enum ErrorCode {
     Conflict,
     /// 缺少或错误的访问令牌;由 Axum 中间件直接返回,core 不产生。
     Unauthorized,
+    Forbidden,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -208,6 +215,9 @@ impl CoreError {
                 (ErrorCode::InvalidData, Some(json!({ "format": format })))
             }
             Self::AssetStore { .. } => (ErrorCode::Database, None),
+            // 名字不存在与口令错误共用一个码,不泄露账号是否存在。
+            Self::InvalidCredentials { .. } => (ErrorCode::Unauthorized, None),
+            Self::Forbidden { reason } => (ErrorCode::Forbidden, Some(json!({ "reason": reason }))),
             Self::InvalidExchangePayload { reason } => {
                 (ErrorCode::InvalidData, Some(json!({ "reason": reason })))
             }

@@ -14,6 +14,7 @@ use crate::assets::AssetStore;
 use crate::context::{build_context, ContextSnapshot, GenerationDraft};
 use crate::llm::ir::images::{GenerateImageRequest, ImageMode, ImageOptions};
 use crate::llm::ir::ModelId;
+use crate::services::auth::Actor;
 use crate::services::llm::{LlmService, SemanticLlmOutput};
 use crate::services::media::MediaService;
 use crate::CoreError;
@@ -32,6 +33,7 @@ pub enum PortValue {
 
 pub struct GraphContext {
     pub db: DatabaseConnection,
+    pub actor: Actor,
     pub llm: Arc<LlmService>,
     pub store: Arc<dyn AssetStore>,
     pub snapshot: ContextSnapshot,
@@ -205,6 +207,7 @@ async fn media_generate(
     };
     let result = MediaService::generate_image(
         &ctx.db,
+        ctx.actor,
         &ctx.llm,
         &ctx.store,
         ctx.request.channel_id,

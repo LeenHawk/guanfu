@@ -37,6 +37,8 @@ async-stream = "0.3"
 tracing = "0.1"
 sha2 = "0.10"
 hmac = "0.12"
+argon2 = "0.5"
+password-hash = { version = "0.5", features = ["getrandom"] }
 async-trait = "0.1"
 hex = "0.4"
 ts-rs = { version = "12", features = ["serde-json-impl"] }

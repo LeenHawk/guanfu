@@ -38,6 +38,8 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub pipeline_asset_id: i32,
+    /// 发起者。
+    pub owner_id: Option<i32>,
     pub status: RunStatus,
     /// `[{ slot, asset_id, revision }]`
     pub inputs: serde_json::Value,

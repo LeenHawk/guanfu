@@ -12,6 +12,7 @@ use guanfu_core::llm::ir::audio::{SpeechRequest, TranscriptionRequest};
 use guanfu_core::llm::ir::images::{EditImageRequest, GenerateImageRequest};
 use guanfu_core::llm::ir::video::CreateVideoRequest;
 use guanfu_core::services::assets::AssetService;
+use guanfu_core::services::auth::{Actor, AuthService, Credentials};
 use guanfu_core::services::channels::{ChannelService, NewChannel, NewCredential};
 use guanfu_core::services::chat::ChatService;
 use guanfu_core::services::exchange::ExchangeService;
@@ -21,7 +22,7 @@ use guanfu_core::services::routing::{PutRoutingRule, RoutingService};
 use guanfu_core::services::runner::{ChatRunRequest, RunnerService};
 use guanfu_core::{AppState, CoreError};
 
-pub fn router(state: AppState, token: Option<crate::auth::Token>) -> Router {
+pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/api/channels", get(list_channels).post(create_channel))
         .route("/api/channels/{id}", delete(delete_channel))
@@ -39,6 +40,8 @@ pub fn router(state: AppState, token: Option<crate::auth::Token>) -> Router {
         .route("/api/llm", axum::routing::post(execute_llm))
         .route("/api/assets", get(list_assets))
         .route("/api/assets/{id}", delete(delete_asset))
+        .route("/api/assets/{id}/share", axum::routing::put(share_asset))
+        .route("/api/users", get(list_users))
         .route(
             "/api/characters/import",
             axum::routing::post(import_character),
@@ -66,26 +69,73 @@ pub fn router(state: AppState, token: Option<crate::auth::Token>) -> Router {
             axum::routing::post(download_video),
         )
         .with_state(state.clone());
-    let api = match token.clone() {
-        Some(token) => api.layer(axum::middleware::from_fn_with_state(
-            token,
-            crate::auth::require_token,
-        )),
-        None => api,
-    };
-    // Realtime 走 WebSocket,令牌随首帧校验(见 realtime::session)。
-    api.merge(
-        Router::new()
-            .route("/api/realtime", get(crate::realtime::handler))
-            .with_state(RealtimeState { state, token }),
-    )
+    let api = api.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::auth::require_session,
+    ));
+
+    // 登录与首次注册在会话之前,必须放在中间件之外。
+    let public = Router::new()
+        .route("/api/auth/status", get(auth_status))
+        .route("/api/auth/register", axum::routing::post(register))
+        .route("/api/auth/login", axum::routing::post(login))
+        // Realtime 走 WebSocket,令牌随首帧校验(见 realtime::session)。
+        .route("/api/realtime", get(crate::realtime::handler))
+        .with_state(state);
+
+    api.merge(public)
 }
 
-/// Realtime 端点自带令牌,不经中间件。
-#[derive(Clone)]
-pub struct RealtimeState {
-    pub state: AppState,
-    pub token: Option<crate::auth::Token>,
+#[derive(serde::Serialize)]
+struct AuthStatus {
+    needs_setup: bool,
+}
+
+async fn auth_status(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(AuthStatus {
+        needs_setup: AuthService::needs_setup(&state.db).await?,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterInput {
+    #[serde(flatten)]
+    credentials: Credentials,
+    /// 引导期的门槛;非回环监听时首次注册必须带(见 auth::guard_public_bind)。
+    #[serde(default)]
+    bootstrap_token: Option<String>,
+    #[serde(default)]
+    is_admin: bool,
+}
+
+/// 注册。首个账号免令牌(此时还没有账号可登录),之后必须由管理员发起。
+async fn register(
+    State(state): State<AppState>,
+    request_actor: Option<axum::Extension<Actor>>,
+    Json(input): Json<RegisterInput>,
+) -> Result<impl IntoResponse, HttpError> {
+    if AuthService::needs_setup(&state.db).await? {
+        if let Some(expected) = crate::auth::bootstrap_secret() {
+            if input.bootstrap_token.as_deref() != Some(expected.as_str()) {
+                return Err(guanfu_core::CoreError::Forbidden {
+                    reason: "bootstrap token required for the first account".to_owned(),
+                }
+                .into());
+            }
+        }
+    }
+    let actor = request_actor.map(|axum::Extension(actor)| actor);
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthService::register(&state.db, actor, &input.credentials, input.is_admin).await?),
+    ))
+}
+
+async fn login(
+    State(state): State<AppState>,
+    Json(input): Json<Credentials>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(AuthService::login(&state.db, &input).await?))
 }
 
 async fn execute_llm(
@@ -128,9 +178,33 @@ async fn execute_llm(
 
 async fn list_assets(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     axum::extract::Query(query): axum::extract::Query<AssetQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    Ok(Json(AssetService::list(&state.db, query.kind).await?))
+    Ok(Json(
+        AssetService::list(&state.db, actor, query.kind).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+struct ShareInput {
+    shared: bool,
+}
+
+/// 共享 / 取消共享;只有归属者与管理员能改。
+async fn share_asset(
+    State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    Path(id): Path<i32>,
+    Json(input): Json<ShareInput>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(
+        AssetService::set_shared(&state.db, actor, id, input.shared).await?,
+    ))
+}
+
+async fn list_users(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(AuthService::list_users(&state.db).await?))
 }
 
 #[derive(serde::Deserialize)]
@@ -140,32 +214,40 @@ struct AssetQuery {
 
 async fn delete_asset(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Path(id): Path<i32>,
 ) -> Result<StatusCode, HttpError> {
-    AssetService::delete(&state.db, id).await?;
+    AssetService::delete(&state.db, actor, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// 角色卡导入:PNG 与 JSON 同一入口,按魔数分辨。
 async fn import_character(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let imported = if body.starts_with(&[0x89, b'P', b'N', b'G']) {
-        ExchangeService::import_ccv2_png(&state.db, &body).await?
+        ExchangeService::import_ccv2_png(&state.db, actor, &body).await?
     } else {
-        ExchangeService::import_ccv2_json(&state.db, &body).await?
+        ExchangeService::import_ccv2_json(&state.db, actor, &body).await?
     };
     Ok((StatusCode::CREATED, Json(imported)))
 }
 
-async fn bootstrap_chat(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
-    Ok(Json(ChatService::bootstrap(&state.db).await?))
+async fn bootstrap_chat(
+    State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok(Json(ChatService::bootstrap(&state.db, actor).await?))
 }
 
-async fn list_histories(State(state): State<AppState>) -> Result<impl IntoResponse, HttpError> {
+async fn list_histories(
+    State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(
-        AssetService::list(&state.db, Some(AssetKind::ChatHistory)).await?,
+        AssetService::list(&state.db, actor, Some(AssetKind::ChatHistory)).await?,
     ))
 }
 
@@ -178,37 +260,43 @@ struct NewHistory {
 
 async fn create_history(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Json(input): Json<NewHistory>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok((
         StatusCode::CREATED,
-        Json(ChatService::create_history(&state.db, &input.title, input.bindings).await?),
+        Json(ChatService::create_history(&state.db, actor, &input.title, input.bindings).await?),
     ))
 }
 
 async fn load_history(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
-    Ok(Json(ChatService::load_history(&state.db, id).await?))
+    Ok(Json(ChatService::load_history(&state.db, actor, id).await?))
 }
 
 /// 直接吐字节:图片与音频要能被 <img>/<audio> 直接引用。
 async fn media_content(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Path(id): Path<i32>,
 ) -> Result<Response, HttpError> {
-    let (media, bytes) = AssetService::read_media(&state.db, state.assets.as_ref(), id).await?;
+    let (media, bytes) =
+        AssetService::read_media(&state.db, actor, state.assets.as_ref(), id).await?;
     Ok(([(axum::http::header::CONTENT_TYPE, media.mime_type)], bytes).into_response())
 }
 
 async fn generate_image(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Json(input): Json<MediaInput<GenerateImageRequest>>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(
         MediaService::generate_image(
             &state.db,
+            actor,
             &state.llm,
             &state.assets,
             input.channel_id,
@@ -221,11 +309,13 @@ async fn generate_image(
 
 async fn edit_image(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Json(input): Json<MediaInput<EditImageRequest>>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(
         MediaService::edit_image(
             &state.db,
+            actor,
             &state.llm,
             &state.assets,
             input.channel_id,
@@ -238,11 +328,13 @@ async fn edit_image(
 
 async fn create_speech(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Json(input): Json<MediaInput<SpeechRequest>>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(
         MediaService::speech(
             &state.db,
+            actor,
             &state.llm,
             &state.assets,
             input.channel_id,
@@ -282,11 +374,13 @@ async fn poll_video(
 
 async fn download_video(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Json(input): Json<VideoJobInput>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(
         MediaService::download_video(
             &state.db,
+            actor,
             &state.llm,
             &state.assets,
             input.channel_id,
@@ -305,23 +399,29 @@ struct ForkHistory {
 
 async fn fork_history(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Path(id): Path<i32>,
     Json(input): Json<ForkHistory>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok((
         StatusCode::CREATED,
-        Json(ChatService::fork_history(&state.db, id, input.message_count, &input.title).await?),
+        Json(
+            ChatService::fork_history(&state.db, actor, id, input.message_count, &input.title)
+                .await?,
+        ),
     ))
 }
 
 /// 聊天 run:pipeline 事件以 SSE 推给前端;客户端断开即取消。
 async fn run_chat(
     State(state): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
     Json(input): Json<ChatRunRequest>,
 ) -> Result<Response, HttpError> {
     use futures_util::StreamExt;
     let events = RunnerService::run_chat(
         state.db.clone(),
+        actor,
         state.llm.clone(),
         state.assets.clone(),
         input,

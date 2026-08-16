@@ -12,4 +12,5 @@ export type ErrorCode =
   | "upstream_rejected"
   | "asset_not_found"
   | "conflict"
-  | "unauthorized";
+  | "unauthorized"
+  | "forbidden";

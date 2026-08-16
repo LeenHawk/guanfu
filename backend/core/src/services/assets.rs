@@ -8,6 +8,7 @@ use time::OffsetDateTime;
 use crate::assets::{AssetDefinition, ChunkContents, ChunkHash, Manifest, SplitManifest};
 use crate::entities::asset::AssetKind;
 use crate::entities::{asset, asset_revision, chunk};
+use crate::services::auth::Actor;
 use crate::CoreError;
 
 /// 对适配层暴露的 Asset 头视图。
@@ -17,6 +18,8 @@ pub struct AssetHeadDto {
     pub kind: AssetKind,
     pub name: String,
     pub head_revision: i32,
+    /// 归属者;`None` 表示共享。
+    pub owner_id: Option<i32>,
 }
 
 impl From<asset::Model> for AssetHeadDto {
@@ -26,6 +29,7 @@ impl From<asset::Model> for AssetHeadDto {
             kind: m.kind,
             name: m.name,
             head_revision: m.head_revision,
+            owner_id: m.owner_id,
         }
     }
 }
@@ -41,8 +45,10 @@ pub struct LoadedAsset<D> {
 pub struct AssetService;
 
 impl AssetService {
+    /// 新建资产默认私有:共享要显式选择,而不是漏配的后果。
     pub async fn create<D: AssetDefinition>(
         db: &impl ConnectionTrait,
+        actor: Actor,
         name: &str,
         created_by_run_id: Option<i32>,
         definition: &D,
@@ -53,6 +59,7 @@ impl AssetService {
         let head = asset::ActiveModel {
             kind: Set(D::KIND),
             name: Set(name.to_owned()),
+            owner_id: Set(Some(actor.user_id)),
             head_revision: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
@@ -64,32 +71,53 @@ impl AssetService {
         Ok(head.into())
     }
 
+    /// 只列出自己的与共享的。
     pub async fn list(
         db: &impl ConnectionTrait,
+        actor: Actor,
         kind: Option<AssetKind>,
     ) -> Result<Vec<AssetHeadDto>, CoreError> {
-        let mut query = asset::Entity::find().order_by_asc(asset::Column::Id);
+        let mut query = asset::Entity::find()
+            .filter(visible_to(actor))
+            .order_by_asc(asset::Column::Id);
         if let Some(kind) = kind {
             query = query.filter(asset::Column::Kind.eq(kind));
         }
         Ok(query.all(db).await?.into_iter().map(Into::into).collect())
     }
 
+    /// 共享 / 取消共享;只有归属者与管理员能改。
+    pub async fn set_shared(
+        db: &impl ConnectionTrait,
+        actor: Actor,
+        id: i32,
+        shared: bool,
+    ) -> Result<AssetHeadDto, CoreError> {
+        let head = find_head(db, id, None).await?;
+        ensure_owner(&head, actor)?;
+        let mut active: asset::ActiveModel = head.into();
+        active.owner_id = Set((!shared).then_some(actor.user_id));
+        active.updated_at = Set(OffsetDateTime::now_utc());
+        Ok(active.update(db).await?.into())
+    }
+
     pub async fn load<D: AssetDefinition>(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
     ) -> Result<LoadedAsset<D>, CoreError> {
-        let head = find_head(db, id, Some(D::KIND)).await?;
+        let head = find_visible(db, actor, id, Some(D::KIND)).await?;
         let revision = head.head_revision;
         Self::load_at(db, head, revision).await
     }
 
     pub async fn load_revision<D: AssetDefinition>(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
         revision: i32,
     ) -> Result<LoadedAsset<D>, CoreError> {
-        let head = find_head(db, id, Some(D::KIND)).await?;
+        let head = find_visible(db, actor, id, Some(D::KIND)).await?;
         Self::load_at(db, head, revision).await
     }
 
@@ -112,12 +140,13 @@ impl AssetService {
     #[tracing::instrument(skip(db, definition), fields(kind = ?D::KIND))]
     pub async fn commit<D: AssetDefinition>(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
         expected_head: i32,
         created_by_run_id: Option<i32>,
         definition: &D,
     ) -> Result<AssetHeadDto, CoreError> {
-        let head = find_head(db, id, Some(D::KIND)).await?;
+        let head = find_visible(db, actor, id, Some(D::KIND)).await?;
         if head.head_revision != expected_head {
             return Err(CoreError::AssetRevisionConflict {
                 id,
@@ -132,6 +161,7 @@ impl AssetService {
             kind: D::KIND,
             name: head.name,
             head_revision: next,
+            owner_id: head.owner_id,
         })
     }
 
@@ -141,12 +171,14 @@ impl AssetService {
     #[tracing::instrument(skip(db, units), fields(count = units.len()))]
     pub async fn append_units(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
         expected_head: i32,
         list: &str,
         units: &[serde_json::Value],
         created_by_run_id: Option<i32>,
     ) -> Result<i32, CoreError> {
+        find_visible(db, actor, id, None).await?;
         let manifest = load_manifest(db, id, expected_head).await?;
         let (hashes, payloads) = crate::assets::split_items(units)?;
         let mut manifest = manifest;
@@ -162,12 +194,14 @@ impl AssetService {
     #[tracing::instrument(skip(db, edits), fields(count = edits.len()))]
     pub async fn revise_units(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
         expected_head: i32,
         list: &str,
         edits: &[crate::assets::edit::HashEdit],
         created_by_run_id: Option<i32>,
     ) -> Result<i32, CoreError> {
+        find_visible(db, actor, id, None).await?;
         let manifest = load_manifest(db, id, expected_head).await?;
         let (manifest, payloads) = crate::assets::edit::apply_hash_edits(&manifest, list, edits)?;
         commit_manifest(db, id, expected_head, manifest, payloads, created_by_run_id).await
@@ -176,17 +210,20 @@ impl AssetService {
     /// fork:新 asset 指向复制的 manifest,chunk 全部结构共享。
     pub async fn fork(
         db: &impl ConnectionTrait,
+        actor: Actor,
         source_id: i32,
         revision: Option<i32>,
         name: &str,
     ) -> Result<AssetHeadDto, CoreError> {
-        let source = find_head(db, source_id, None).await?;
+        let source = find_visible(db, actor, source_id, None).await?;
         let revision = revision.unwrap_or(source.head_revision);
         let manifest = load_manifest(db, source_id, revision).await?;
         let now = OffsetDateTime::now_utc();
         let head = asset::ActiveModel {
             kind: Set(source.kind),
             name: Set(name.to_owned()),
+            // fork 出来的是自己的副本,不继承来源的共享状态。
+            owner_id: Set(Some(actor.user_id)),
             head_revision: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
@@ -199,7 +236,9 @@ impl AssetService {
     }
 
     /// 删除头指针与修订;chunk 共享,留给显式维护操作清理。
-    pub async fn delete(db: &impl ConnectionTrait, id: i32) -> Result<(), CoreError> {
+    pub async fn delete(db: &impl ConnectionTrait, actor: Actor, id: i32) -> Result<(), CoreError> {
+        let head = find_visible(db, actor, id, None).await?;
+        ensure_owner(&head, actor)?;
         asset_revision::Entity::delete_many()
             .filter(asset_revision::Column::AssetId.eq(id))
             .exec(db)
@@ -214,6 +253,7 @@ impl AssetService {
     /// 对象由显式维护操作清理(计划 §2.2)。
     pub async fn create_media(
         db: &impl ConnectionTrait,
+        actor: Actor,
         store: &dyn crate::assets::AssetStore,
         name: &str,
         mime_type: &str,
@@ -238,6 +278,7 @@ impl AssetService {
         .await?;
         Self::create(
             db,
+            actor,
             name,
             None,
             &crate::assets::MediaDefinition::V1(crate::assets::media::MediaV1 {
@@ -254,10 +295,11 @@ impl AssetService {
     /// 读取 Media Asset 的元数据与字节。
     pub async fn read_media(
         db: &impl ConnectionTrait,
+        actor: Actor,
         store: &dyn crate::assets::AssetStore,
         id: i32,
     ) -> Result<(crate::assets::media::MediaV1, Vec<u8>), CoreError> {
-        let loaded = Self::load::<crate::assets::MediaDefinition>(db, id).await?;
+        let loaded = Self::load::<crate::assets::MediaDefinition>(db, actor, id).await?;
         let crate::assets::MediaDefinition::V1(media) = loaded.definition;
         let bytes = store.get(&media.hash).await?;
         Ok((media, bytes))
@@ -299,6 +341,44 @@ async fn commit_manifest(
         });
     }
     Ok(next)
+}
+
+/// 可见 = 共享的,或自己的。
+fn visible_to(actor: Actor) -> sea_orm::Condition {
+    use sea_orm::Condition;
+    Condition::any()
+        .add(asset::Column::OwnerId.is_null())
+        .add(asset::Column::OwnerId.eq(actor.user_id))
+}
+
+/// 共享资产人人可写(共享的意义就在于共同维护);私有资产只有归属者可写。
+/// 不可见的资产一律按"不存在"回复,不泄露它的存在。
+async fn find_visible(
+    db: &impl ConnectionTrait,
+    actor: Actor,
+    id: i32,
+    expected: Option<AssetKind>,
+) -> Result<asset::Model, CoreError> {
+    let head = find_head(db, id, expected).await?;
+    match head.owner_id {
+        None => Ok(head),
+        Some(owner) if owner == actor.user_id || actor.is_admin => Ok(head),
+        Some(_) => Err(CoreError::AssetNotFound(id)),
+    }
+}
+
+/// 改共享状态与删除限归属者(或管理员)。
+fn ensure_owner(head: &asset::Model, actor: Actor) -> Result<(), CoreError> {
+    match head.owner_id {
+        Some(owner) if owner != actor.user_id && !actor.is_admin => Err(CoreError::Forbidden {
+            reason: "only the owner can change or delete this asset".to_owned(),
+        }),
+        // 共享资产的删除/取消共享也限管理员,避免互删。
+        None if !actor.is_admin => Err(CoreError::Forbidden {
+            reason: "only an administrator can change a shared asset".to_owned(),
+        }),
+        _ => Ok(()),
+    }
 }
 
 async fn find_head(
@@ -435,31 +515,40 @@ mod tests {
         db
     }
 
+    fn actor(user_id: i32) -> Actor {
+        Actor {
+            user_id,
+            is_admin: false,
+        }
+    }
+
     #[tokio::test]
     async fn round_trip_cas_fork_and_kind_boundary() {
         let db = db().await;
         let initial = book(&["a", "b"]);
-        let head = AssetService::create(&db, "wb", None, &initial)
+        let head = AssetService::create(&db, actor(1), "wb", None, &initial)
             .await
             .unwrap();
         assert_eq!(head.head_revision, 1);
 
         let loaded: LoadedAsset<WorldBookDefinition> =
-            AssetService::load(&db, head.id).await.unwrap();
+            AssetService::load(&db, actor(1), head.id).await.unwrap();
         assert_eq!(loaded.definition, initial);
 
         // 追加 = 新 chunk + 新 manifest;旧修订仍可取回。
         let appended = book(&["a", "b", "c"]);
-        let head2 = AssetService::commit(&db, head.id, 1, None, &appended)
+        let head2 = AssetService::commit(&db, actor(1), head.id, 1, None, &appended)
             .await
             .unwrap();
         assert_eq!(head2.head_revision, 2);
         let old: LoadedAsset<WorldBookDefinition> =
-            AssetService::load_revision(&db, head.id, 1).await.unwrap();
+            AssetService::load_revision(&db, actor(1), head.id, 1)
+                .await
+                .unwrap();
         assert_eq!(entry_contents(&old.definition), ["a", "b"]);
 
         // CAS:过期头指针显式冲突。
-        let stale = AssetService::commit(&db, head.id, 1, None, &appended).await;
+        let stale = AssetService::commit(&db, actor(1), head.id, 1, None, &appended).await;
         assert!(matches!(
             stale,
             Err(CoreError::AssetRevisionConflict { .. })
@@ -467,7 +556,7 @@ mod tests {
 
         // fork 结构共享:不产生新 chunk。
         let chunks_before = chunk::Entity::find().all(&db).await.unwrap().len();
-        let fork = AssetService::fork(&db, head.id, None, "wb-fork")
+        let fork = AssetService::fork(&db, actor(1), head.id, None, "wb-fork")
             .await
             .unwrap();
         assert_eq!(
@@ -475,11 +564,11 @@ mod tests {
             chunk::Entity::find().all(&db).await.unwrap().len()
         );
         let forked: LoadedAsset<WorldBookDefinition> =
-            AssetService::load(&db, fork.id).await.unwrap();
+            AssetService::load(&db, actor(1), fork.id).await.unwrap();
         assert_eq!(entry_contents(&forked.definition), ["a", "b", "c"]);
 
         // kind 与 definition 不匹配 → 结构化错误。
-        let mismatch = AssetService::load::<CharacterDefinition>(&db, head.id).await;
+        let mismatch = AssetService::load::<CharacterDefinition>(&db, actor(1), head.id).await;
         assert!(matches!(mismatch, Err(CoreError::AssetKindMismatch { .. })));
 
         // 体量小的 kind 全内联:零 chunk。
@@ -488,15 +577,47 @@ mod tests {
             greetings: vec!["hello".into()],
             ..Default::default()
         });
-        let head3 = AssetService::create(&db, "char", None, &character)
+        let head3 = AssetService::create(&db, actor(1), "char", None, &character)
             .await
             .unwrap();
         let reloaded: LoadedAsset<CharacterDefinition> =
-            AssetService::load(&db, head3.id).await.unwrap();
+            AssetService::load(&db, actor(1), head3.id).await.unwrap();
         assert_eq!(reloaded.definition, character);
         assert_eq!(
             chunk::Entity::find().all(&db).await.unwrap().len(),
             chunks_before
         );
+    }
+
+    /// 归属规则:私有资产别人看不见,共享后可见;
+    /// 不可见按"不存在"回复,不从错误里泄露它的存在。
+    #[tokio::test]
+    async fn private_assets_are_invisible_until_shared() {
+        let db = db().await;
+        let mine = AssetService::create(&db, actor(1), "private", None, &book(&["secret"]))
+            .await
+            .unwrap();
+
+        let listed = AssetService::list(&db, actor(2), None).await.unwrap();
+        assert!(listed.is_empty(), "another user sees nothing");
+        let peeked = AssetService::load::<WorldBookDefinition>(&db, actor(2), mine.id).await;
+        assert!(
+            matches!(peeked, Err(CoreError::AssetNotFound(_))),
+            "invisible assets read as missing, not as forbidden"
+        );
+
+        let shared = AssetService::set_shared(&db, actor(1), mine.id, true)
+            .await
+            .unwrap();
+        assert_eq!(shared.owner_id, None);
+        let listed = AssetService::list(&db, actor(2), None).await.unwrap();
+        assert_eq!(listed.len(), 1, "shared assets are visible to everyone");
+        AssetService::load::<WorldBookDefinition>(&db, actor(2), mine.id)
+            .await
+            .expect("shared assets are readable");
+
+        // 共享资产的删除/取消共享限管理员,避免互删。
+        let stolen = AssetService::set_shared(&db, actor(2), mine.id, false).await;
+        assert!(matches!(stolen, Err(CoreError::Forbidden { .. })));
     }
 }

@@ -12,6 +12,7 @@ use crate::assets::world_book::WorldBookDefinition;
 use crate::context::{ContextSnapshot, HistoryTurn, TurnRole};
 use crate::llm::ir::generation::{InputContent, OutputContent, OutputItem};
 use crate::services::assets::AssetService;
+use crate::services::auth::Actor;
 use crate::services::runs::ResolvedSlot;
 use crate::CoreError;
 
@@ -19,6 +20,7 @@ use super::{ChatRunRequest, HISTORY_SLOT};
 
 pub async fn load_snapshot(
     db: &impl ConnectionTrait,
+    actor: Actor,
     inputs: &[ResolvedSlot],
     request: &ChatRunRequest,
     run_id: i32,
@@ -37,6 +39,7 @@ pub async fn load_snapshot(
             "character" => {
                 let loaded = AssetService::load_revision::<CharacterDefinition>(
                     db,
+                    actor,
                     slot.asset_id,
                     slot.revision,
                 )
@@ -47,6 +50,7 @@ pub async fn load_snapshot(
             "persona" => {
                 let loaded = AssetService::load_revision::<PersonaDefinition>(
                     db,
+                    actor,
                     slot.asset_id,
                     slot.revision,
                 )
@@ -57,6 +61,7 @@ pub async fn load_snapshot(
             "world_books" => {
                 let loaded = AssetService::load_revision::<WorldBookDefinition>(
                     db,
+                    actor,
                     slot.asset_id,
                     slot.revision,
                 )
@@ -67,6 +72,7 @@ pub async fn load_snapshot(
             "preset" => {
                 let loaded = AssetService::load_revision::<OpenAiChatPresetDefinition>(
                     db,
+                    actor,
                     slot.asset_id,
                     slot.revision,
                 )
@@ -77,6 +83,7 @@ pub async fn load_snapshot(
             HISTORY_SLOT => {
                 let loaded = AssetService::load_revision::<ChatHistoryDefinition>(
                     db,
+                    actor,
                     slot.asset_id,
                     slot.revision,
                 )

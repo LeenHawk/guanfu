@@ -23,6 +23,7 @@ use crate::llm::ir::generation::{
 };
 use crate::llm::ir::{ModelId, Usage};
 use crate::services::assets::AssetService;
+use crate::services::auth::Actor;
 use crate::services::llm::LlmService;
 use crate::services::runs::{ResolvedSlot, RunService, SlotBinding};
 use crate::CoreError;
@@ -81,12 +82,13 @@ impl RunnerService {
     ))]
     pub async fn run_chat(
         db: DatabaseConnection,
+        actor: Actor,
         llm: std::sync::Arc<LlmService>,
         store: std::sync::Arc<dyn crate::assets::AssetStore>,
         request: ChatRunRequest,
     ) -> Result<impl Stream<Item = PipelineEvent>, CoreError> {
-        let definition = template::load_pipeline(&db, request.pipeline_asset_id).await?;
-        let inputs = RunService::resolve_slots(&db, &definition, &request.bindings).await?;
+        let definition = template::load_pipeline(&db, actor, request.pipeline_asset_id).await?;
+        let inputs = RunService::resolve_slots(&db, actor, &definition, &request.bindings).await?;
         let PipelineDefinition::V1(pipeline) = definition;
         let history_slot = inputs
             .iter()
@@ -96,13 +98,14 @@ impl RunnerService {
                 slot: HISTORY_SLOT.to_owned(),
                 reason: "chat runs need a history slot".to_owned(),
             })?;
-        let run = RunService::start(&db, request.pipeline_asset_id, &inputs).await?;
+        let run = RunService::start(&db, actor, request.pipeline_asset_id, &inputs).await?;
         tracing::Span::current().record("run_id", run.id);
-        let snapshot = snapshot::load_snapshot(&db, &inputs, &request, run.id).await?;
+        let snapshot = snapshot::load_snapshot(&db, actor, &inputs, &request, run.id).await?;
 
         let (progress, mut incoming) = tokio::sync::mpsc::unbounded_channel();
         let context = graph::GraphContext {
             db,
+            actor,
             llm,
             store,
             snapshot,
@@ -163,6 +166,7 @@ async fn run_graph(
         })?;
     commit_turn(
         &context.db,
+        context.actor,
         context.run_id,
         history_slot,
         context.request.user_message.clone(),
@@ -211,6 +215,7 @@ impl AssistantTurn {
 
 async fn commit_turn(
     db: &impl ConnectionTrait,
+    actor: Actor,
     run_id: i32,
     history_slot: &ResolvedSlot,
     user_message: Option<String>,
@@ -235,6 +240,7 @@ async fn commit_turn(
 
     let revision = AssetService::append_units(
         db,
+        actor,
         history_slot.asset_id,
         history_slot.revision,
         MESSAGES,

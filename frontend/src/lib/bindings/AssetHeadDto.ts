@@ -9,4 +9,8 @@ export type AssetHeadDto = {
   kind: AssetKind;
   name: string;
   head_revision: number;
+  /**
+   * 归属者;`None` 表示共享。
+   */
+  owner_id: number | null;
 };

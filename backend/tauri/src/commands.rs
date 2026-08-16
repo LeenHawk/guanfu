@@ -9,6 +9,7 @@ use guanfu_core::llm::ir::video::{CreateVideoRequest, VideoJob};
 use guanfu_core::llm::ir::OperationRequest;
 use guanfu_core::llm::ir::OperationResponse;
 use guanfu_core::services::assets::{AssetHeadDto, AssetService};
+use guanfu_core::services::auth::AuthService;
 use guanfu_core::services::channels::{
     ChannelDto, ChannelService, CredentialDto, NewChannel, NewCredential,
 };
@@ -24,6 +25,12 @@ use tauri::{ipc::Channel, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::{ActiveLlmRequests, ActiveRealtimeSessions};
+
+/// 桌面壳是本地单用户进程:不登录,但资产仍要有归属主体,
+/// 这样 core 的可见性规则在两壳里是同一套而不是各写一份。
+async fn local_actor(state: &AppState) -> Result<guanfu_core::services::auth::Actor, ApiError> {
+    AuthService::local_actor(&state.db).await.map_err(api_error)
+}
 
 fn api_error(error: CoreError) -> ApiError {
     tracing::error!(error = ?error, "core operation failed");
@@ -210,12 +217,18 @@ pub async fn list_assets(
     state: State<'_, AppState>,
     kind: Option<AssetKind>,
 ) -> Result<Vec<AssetHeadDto>, ApiError> {
-    AssetService::list(&state.db, kind).await.map_err(api_error)
+    let actor = local_actor(&state).await?;
+    AssetService::list(&state.db, actor, kind)
+        .await
+        .map_err(api_error)
 }
 
 #[tauri::command]
 pub async fn delete_asset(state: State<'_, AppState>, id: i32) -> Result<(), ApiError> {
-    AssetService::delete(&state.db, id).await.map_err(api_error)
+    let actor = local_actor(&state).await?;
+    AssetService::delete(&state.db, actor, id)
+        .await
+        .map_err(api_error)
 }
 
 /// 角色卡导入:PNG 与 JSON 同一入口,按魔数分辨。
@@ -224,17 +237,21 @@ pub async fn import_character(
     state: State<'_, AppState>,
     bytes: Vec<u8>,
 ) -> Result<ImportedCharacter, ApiError> {
+    let actor = local_actor(&state).await?;
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        ExchangeService::import_ccv2_png(&state.db, &bytes).await
+        ExchangeService::import_ccv2_png(&state.db, actor, &bytes).await
     } else {
-        ExchangeService::import_ccv2_json(&state.db, &bytes).await
+        ExchangeService::import_ccv2_json(&state.db, actor, &bytes).await
     }
     .map_err(api_error)
 }
 
 #[tauri::command]
 pub async fn bootstrap_chat(state: State<'_, AppState>) -> Result<ChatBootstrap, ApiError> {
-    ChatService::bootstrap(&state.db).await.map_err(api_error)
+    let actor = local_actor(&state).await?;
+    ChatService::bootstrap(&state.db, actor)
+        .await
+        .map_err(api_error)
 }
 
 #[tauri::command]
@@ -243,7 +260,8 @@ pub async fn create_chat_history(
     title: String,
     bindings: SessionBindings,
 ) -> Result<AssetHeadDto, ApiError> {
-    ChatService::create_history(&state.db, &title, bindings)
+    let actor = local_actor(&state).await?;
+    ChatService::create_history(&state.db, actor, &title, bindings)
         .await
         .map_err(api_error)
 }
@@ -253,7 +271,8 @@ pub async fn load_chat_history(
     state: State<'_, AppState>,
     id: i32,
 ) -> Result<ChatHistoryView, ApiError> {
-    ChatService::load_history(&state.db, id)
+    let actor = local_actor(&state).await?;
+    ChatService::load_history(&state.db, actor, id)
         .await
         .map_err(api_error)
 }
@@ -265,7 +284,8 @@ pub async fn fork_chat_history(
     message_count: u32,
     title: String,
 ) -> Result<AssetHeadDto, ApiError> {
-    ChatService::fork_history(&state.db, id, message_count, &title)
+    let actor = local_actor(&state).await?;
+    ChatService::fork_history(&state.db, actor, id, message_count, &title)
         .await
         .map_err(api_error)
 }
@@ -287,8 +307,10 @@ pub async fn run_chat(
         .lock()
         .expect("active request lock poisoned")
         .insert(request_id.clone(), cancellation.clone());
+    let actor = local_actor(&state).await?;
     let started = RunnerService::run_chat(
         state.db.clone(),
+        actor,
         state.llm.clone(),
         state.assets.clone(),
         input,
@@ -320,7 +342,8 @@ pub async fn run_chat(
 pub async fn media_data_url(state: State<'_, AppState>, id: i32) -> Result<String, ApiError> {
     use base64::Engine;
 
-    let (media, bytes) = AssetService::read_media(&state.db, state.assets.as_ref(), id)
+    let actor = local_actor(&state).await?;
+    let (media, bytes) = AssetService::read_media(&state.db, actor, state.assets.as_ref(), id)
         .await
         .map_err(api_error)?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
@@ -332,8 +355,10 @@ pub async fn generate_image(
     state: State<'_, AppState>,
     input: MediaInput<GenerateImageRequest>,
 ) -> Result<MediaResult, ApiError> {
+    let actor = local_actor(&state).await?;
     MediaService::generate_image(
         &state.db,
+        actor,
         &state.llm,
         &state.assets,
         input.channel_id,
@@ -349,8 +374,10 @@ pub async fn edit_image(
     state: State<'_, AppState>,
     input: MediaInput<EditImageRequest>,
 ) -> Result<MediaResult, ApiError> {
+    let actor = local_actor(&state).await?;
     MediaService::edit_image(
         &state.db,
+        actor,
         &state.llm,
         &state.assets,
         input.channel_id,
@@ -366,8 +393,10 @@ pub async fn create_speech(
     state: State<'_, AppState>,
     input: MediaInput<SpeechRequest>,
 ) -> Result<AssetHeadDto, ApiError> {
+    let actor = local_actor(&state).await?;
     MediaService::speech(
         &state.db,
+        actor,
         &state.llm,
         &state.assets,
         input.channel_id,
@@ -413,8 +442,10 @@ pub async fn download_video(
     state: State<'_, AppState>,
     input: VideoJobInput,
 ) -> Result<AssetHeadDto, ApiError> {
+    let actor = local_actor(&state).await?;
     MediaService::download_video(
         &state.db,
+        actor,
         &state.llm,
         &state.assets,
         input.channel_id,

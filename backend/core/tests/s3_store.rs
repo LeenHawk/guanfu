@@ -33,6 +33,7 @@ async fn round_trips_against_a_real_bucket() {
 #[tokio::test]
 async fn media_assets_land_in_the_object_store() {
     use guanfu_core::services::assets::AssetService;
+    use guanfu_core::services::auth::Actor;
     use std::sync::Arc;
 
     let Some(config) = S3AssetStore::from_env() else {
@@ -49,8 +50,13 @@ async fn media_assets_land_in_the_object_store() {
     .unwrap();
 
     let bytes = format!("png-ish bytes {}", std::process::id()).into_bytes();
+    let actor = Actor {
+        user_id: 1,
+        is_admin: false,
+    };
     let head = AssetService::create_media(
         &state.db,
+        actor,
         store.as_ref(),
         "probe",
         "image/png",
@@ -60,7 +66,7 @@ async fn media_assets_land_in_the_object_store() {
     .await
     .expect("create media");
 
-    let (media, read) = AssetService::read_media(&state.db, store.as_ref(), head.id)
+    let (media, read) = AssetService::read_media(&state.db, actor, store.as_ref(), head.id)
         .await
         .expect("read media");
     assert_eq!(read, bytes, "bytes survive the object store");

@@ -16,6 +16,7 @@ use crate::assets::preset::{
 };
 use crate::entities::asset::AssetKind;
 use crate::services::assets::{AssetHeadDto, AssetService};
+use crate::services::auth::Actor;
 use crate::services::runner::ensure_chat_pipeline;
 use crate::CoreError;
 
@@ -42,9 +43,12 @@ pub struct ChatService;
 
 impl ChatService {
     /// 确保内置模板与默认预设存在。
-    pub async fn bootstrap(db: &impl ConnectionTrait) -> Result<ChatBootstrap, CoreError> {
-        let pipeline_asset_id = ensure_chat_pipeline(db).await?;
-        let existing = AssetService::list(db, Some(AssetKind::OpenAiChatPreset)).await?;
+    pub async fn bootstrap(
+        db: &impl ConnectionTrait,
+        actor: Actor,
+    ) -> Result<ChatBootstrap, CoreError> {
+        let pipeline_asset_id = ensure_chat_pipeline(db, actor).await?;
+        let existing = AssetService::list(db, actor, Some(AssetKind::OpenAiChatPreset)).await?;
         let preset_asset_id = match existing
             .into_iter()
             .find(|head| head.name == DEFAULT_PRESET_NAME)
@@ -53,6 +57,7 @@ impl ChatService {
             None => {
                 AssetService::create(
                     db,
+                    actor,
                     DEFAULT_PRESET_NAME,
                     None,
                     &OpenAiChatPresetDefinition::V1(default_preset()),
@@ -69,11 +74,13 @@ impl ChatService {
 
     pub async fn create_history(
         db: &impl ConnectionTrait,
+        actor: Actor,
         title: &str,
         bindings: SessionBindings,
     ) -> Result<AssetHeadDto, CoreError> {
         AssetService::create(
             db,
+            actor,
             title,
             None,
             &ChatHistoryDefinition::V1(ChatHistoryV1 {
@@ -90,13 +97,14 @@ impl ChatService {
     /// manifest 复制 + chunk 结构共享,因此 fork 不按历史长度收费。
     pub async fn fork_history(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
         message_count: u32,
         title: &str,
     ) -> Result<AssetHeadDto, CoreError> {
         use crate::assets::refs::ChatHistoryRef;
 
-        let loaded = AssetService::load::<ChatHistoryDefinition>(db, id).await?;
+        let loaded = AssetService::load::<ChatHistoryDefinition>(db, actor, id).await?;
         let ChatHistoryDefinition::V1(mut history) = loaded.definition;
         history.messages.truncate(message_count as usize);
         history.title = title.to_owned();
@@ -105,14 +113,15 @@ impl ChatService {
             source_revision: loaded.revision,
             message_count,
         });
-        AssetService::create(db, title, None, &ChatHistoryDefinition::V1(history)).await
+        AssetService::create(db, actor, title, None, &ChatHistoryDefinition::V1(history)).await
     }
 
     pub async fn load_history(
         db: &impl ConnectionTrait,
+        actor: Actor,
         id: i32,
     ) -> Result<ChatHistoryView, CoreError> {
-        let loaded = AssetService::load::<ChatHistoryDefinition>(db, id).await?;
+        let loaded = AssetService::load::<ChatHistoryDefinition>(db, actor, id).await?;
         let ChatHistoryDefinition::V1(history) = loaded.definition;
         Ok(ChatHistoryView {
             head: loaded.head,

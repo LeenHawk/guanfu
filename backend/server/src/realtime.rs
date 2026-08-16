@@ -3,7 +3,6 @@
 //! 通用 `/api/llm` 只承载请求/响应,双工会话需要独立端点:浏览器连上来后
 //! 先发一条会话配置,服务端据此建立上游连接,之后两个方向各自泵事件。
 
-use crate::routes::RealtimeState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
@@ -11,16 +10,17 @@ use futures_util::{SinkExt, StreamExt};
 use guanfu_core::llm::ir::platform::PlatformRequest;
 use guanfu_core::llm::ir::realtime::RealtimeClientEvent;
 use guanfu_core::llm::ir::OperationRequest;
+use guanfu_core::services::auth::AuthService;
 use guanfu_core::services::llm::SemanticLlmOutput;
 use guanfu_core::services::realtime::{
     RealtimeDownstream as Downstream, RealtimeHandshake as Handshake,
 };
-pub async fn handler(upgrade: WebSocketUpgrade, State(state): State<RealtimeState>) -> Response {
+use guanfu_core::AppState;
+pub async fn handler(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     upgrade.on_upgrade(move |socket| session(socket, state))
 }
 
-async fn session(socket: WebSocket, realtime: RealtimeState) {
-    let RealtimeState { state, token } = realtime;
+async fn session(socket: WebSocket, state: AppState) {
     let (mut client_tx, mut client_rx) = socket.split();
 
     let handshake = match client_rx.next().await {
@@ -44,17 +44,23 @@ async fn session(socket: WebSocket, realtime: RealtimeState) {
         }
     };
 
-    if let Some(expected) = &token {
-        if handshake.token.as_deref() != Some(expected.0.as_str()) {
-            let _ = send_down(
-                &mut client_tx,
-                Downstream::Error {
-                    error: guanfu_core::CoreError::WebSocket("unauthorized".to_owned()).api_error(),
-                },
-            )
-            .await;
-            return;
-        }
+    // WebSocket 握手带不了 Authorization 头,会话令牌随首帧校验。
+    let authenticated = match handshake.token.as_deref() {
+        Some(token) => AuthService::actor_for(&state.db, token).await.is_ok(),
+        None => false,
+    };
+    if !authenticated {
+        let _ = send_down(
+            &mut client_tx,
+            Downstream::Error {
+                error: guanfu_core::CoreError::InvalidCredentials {
+                    reason: "realtime requires a session token".to_owned(),
+                }
+                .api_error(),
+            },
+        )
+        .await;
+        return;
     }
 
     let output = state

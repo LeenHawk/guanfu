@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod auth;
 pub mod channels;
 pub mod chat;
 pub mod exchange;
