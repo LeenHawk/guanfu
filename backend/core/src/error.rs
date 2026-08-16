@@ -101,6 +101,12 @@ pub enum CoreError {
 
     #[error("invalid binding for slot {slot}: {reason}")]
     InvalidRunBinding { slot: String, reason: String },
+
+    #[error("unsupported exchange format: {format}")]
+    UnsupportedExchangeFormat { format: String },
+
+    #[error("invalid exchange payload: {reason}")]
+    InvalidExchangePayload { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -191,6 +197,12 @@ impl CoreError {
             ),
             Self::ChunkMissing(hash) => (ErrorCode::Database, Some(json!({ "chunk": hash }))),
             Self::InvalidPipeline { reason } => {
+                (ErrorCode::InvalidData, Some(json!({ "reason": reason })))
+            }
+            Self::UnsupportedExchangeFormat { format } => {
+                (ErrorCode::InvalidData, Some(json!({ "format": format })))
+            }
+            Self::InvalidExchangePayload { reason } => {
                 (ErrorCode::InvalidData, Some(json!({ "reason": reason })))
             }
             Self::RunNotFound(id) => (ErrorCode::AssetNotFound, Some(json!({ "run_id": id }))),

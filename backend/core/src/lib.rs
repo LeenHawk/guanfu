@@ -11,6 +11,7 @@ pub mod assets;
 mod db;
 pub mod entities;
 pub mod error;
+pub mod exchange;
 pub mod llm;
 pub mod services;
 
