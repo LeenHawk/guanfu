@@ -136,5 +136,19 @@
   "token_prompt": "This server requires an access token",
   "token_label": "Access token",
   "token_save": "Save",
-  "realtime_say": "Type instead"
+  "realtime_say": "Type instead",
+  "auth_setup_title": "Create administrator",
+  "auth_login_title": "Sign in",
+  "auth_setup_hint": "This is the first account and becomes the administrator; later accounts are created by an admin.",
+  "auth_name": "Name",
+  "auth_password": "Password",
+  "auth_bootstrap": "Bootstrap token (required for public deployments)",
+  "auth_create": "Create and sign in",
+  "auth_signin": "Sign in",
+  "sign_out": "Sign out",
+  "forbidden": "Not allowed",
+  "shared": "Shared",
+  "private": "Private",
+  "share": "Share with everyone",
+  "unshare": "Make private"
 }

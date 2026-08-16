@@ -136,5 +136,19 @@
   "token_prompt": "该服务端要求访问令牌",
   "token_label": "访问令牌",
   "token_save": "保存",
-  "realtime_say": "打字发言"
+  "realtime_say": "打字发言",
+  "auth_setup_title": "创建管理员",
+  "auth_login_title": "登录",
+  "auth_setup_hint": "这是首个账号,将成为管理员;之后的账号由管理员创建。",
+  "auth_name": "用户名",
+  "auth_password": "口令",
+  "auth_bootstrap": "引导令牌(公网部署时必填)",
+  "auth_create": "创建并登录",
+  "auth_signin": "登录",
+  "sign_out": "退出登录",
+  "forbidden": "没有权限",
+  "shared": "已共享",
+  "private": "私有",
+  "share": "共享给所有人",
+  "unshare": "取消共享"
 }

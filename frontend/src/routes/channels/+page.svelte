@@ -7,7 +7,8 @@
   import { api } from "$lib/api/channels";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
-  import TokenGate from "$lib/components/TokenGate.svelte";
+  import AuthGate from "$lib/components/AuthGate.svelte";
+  import { authApi } from "$lib/api/auth";
   import ChannelDialog from "$lib/components/ChannelDialog.svelte";
   import ChannelSidebar from "$lib/components/ChannelSidebar.svelte";
   import ChannelWorkspace from "$lib/components/ChannelWorkspace.svelte";
@@ -24,6 +25,7 @@
   let submitting = $state(false);
   let dialogOpen = $state(false);
   let errorCode = $state<string | null>(null);
+  let needsSetup = $state(false);
   let confirming = $state<{
     message: string;
     action: () => Promise<void>;
@@ -41,6 +43,13 @@
       error instanceof ApiClientError
         ? error.payload.code
         : "upstream_unavailable";
+    // 401 时问一下服务端有没有账号,决定弹"创建管理员"还是"登录"。
+    if (errorCode === "unauthorized") {
+      void authApi
+        .status()
+        .then((status) => (needsSetup = status.needs_setup))
+        .catch(() => (needsSetup = false));
+    }
   }
 
   async function run(task: () => Promise<void>) {
@@ -221,9 +230,10 @@
   {/if}
 </div>
 
-<TokenGate
+<AuthGate
   open={errorCode === "unauthorized"}
-  onsaved={() => {
+  {needsSetup}
+  onsignedin={() => {
     errorCode = null;
     void loadChannels();
   }}

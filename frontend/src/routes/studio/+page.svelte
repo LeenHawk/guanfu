@@ -5,7 +5,8 @@
   import { chatApi } from "$lib/api/chat";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
-  import TokenGate from "$lib/components/TokenGate.svelte";
+  import AuthGate from "$lib/components/AuthGate.svelte";
+  import { authApi } from "$lib/api/auth";
   import AudioStudio from "$lib/components/AudioStudio.svelte";
   import ImageStudio from "$lib/components/ImageStudio.svelte";
   import MediaGallery from "$lib/components/MediaGallery.svelte";
@@ -21,6 +22,7 @@
   let channelId = $state<number | null>(null);
   let media = $state<AssetHeadDto[]>([]);
   let errorCode = $state<string | null>(null);
+  let needsSetup = $state(false);
 
   $effect(() => {
     void load();
@@ -33,6 +35,13 @@
         : typeof error === "object" && error && "code" in error
           ? String((error as { code: unknown }).code)
           : "upstream_unavailable";
+    // 401 时问一下服务端有没有账号,决定弹"创建管理员"还是"登录"。
+    if (errorCode === "unauthorized") {
+      void authApi
+        .status()
+        .then((status) => (needsSetup = status.needs_setup))
+        .catch(() => (needsSetup = false));
+    }
   }
 
   async function load() {
@@ -124,9 +133,10 @@
   </main>
 </div>
 
-<TokenGate
+<AuthGate
   open={errorCode === "unauthorized"}
-  onsaved={() => {
+  {needsSetup}
+  onsignedin={() => {
     errorCode = null;
     void load();
   }}

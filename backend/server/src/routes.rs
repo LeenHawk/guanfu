@@ -109,11 +109,22 @@ struct RegisterInput {
 }
 
 /// 注册。首个账号免令牌(此时还没有账号可登录),之后必须由管理员发起。
+///
+/// 端点在会话中间件之外(引导期没有会话可用),所以这里自己解析令牌——
+/// 否则管理员的身份永远到不了这个 handler,建号会一直被拒。
 async fn register(
     State(state): State<AppState>,
-    request_actor: Option<axum::Extension<Actor>>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<RegisterInput>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let presented = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let actor = match presented {
+        Some(token) => Some(AuthService::actor_for(&state.db, token).await?.0),
+        None => None,
+    };
     if AuthService::needs_setup(&state.db).await? {
         if let Some(expected) = crate::auth::bootstrap_secret() {
             if input.bootstrap_token.as_deref() != Some(expected.as_str()) {
@@ -124,7 +135,6 @@ async fn register(
             }
         }
     }
-    let actor = request_actor.map(|axum::Extension(actor)| actor);
     Ok((
         StatusCode::CREATED,
         Json(AuthService::register(&state.db, actor, &input.credentials, input.is_admin).await?),

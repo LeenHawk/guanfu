@@ -12,6 +12,7 @@ use guanfu_core::llm::codec::OperationEvent;
 use guanfu_core::llm::ir::realtime::{RealtimeClientEvent, RealtimeServerEvent};
 use guanfu_core::llm::ir::{OperationRequest, OperationResponse};
 use guanfu_core::services::assets::AssetHeadDto;
+use guanfu_core::services::auth::{Credentials, SessionDto, UserDto};
 use guanfu_core::services::channels::{ChannelDto, CredentialDto, NewChannel, NewCredential};
 use guanfu_core::services::chat::{ChatBootstrap, ChatHistoryView};
 use guanfu_core::services::exchange::ImportedCharacter;
@@ -48,6 +49,9 @@ fn main() -> Result<(), ts_rs::ExportError> {
     SemanticStreamMessage::export_all(&config)?;
     AssetKind::export_all(&config)?;
     AssetHeadDto::export_all(&config)?;
+    UserDto::export_all(&config)?;
+    SessionDto::export_all(&config)?;
+    Credentials::export_all(&config)?;
     CharacterDefinition::export_all(&config)?;
     PersonaDefinition::export_all(&config)?;
     WorldBookDefinition::export_all(&config)?;

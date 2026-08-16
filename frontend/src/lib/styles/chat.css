@@ -203,3 +203,18 @@
   color: var(--color-muted);
   font-size: 13px;
 }
+
+.auth-hint {
+  margin: -12px 0 20px;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.auth-error {
+  margin: 0;
+  color: var(--color-cinnabar);
+  font-size: 13px;
+}
+.share-toggle {
+  font-size: 12px;
+}

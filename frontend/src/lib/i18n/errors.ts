@@ -12,6 +12,7 @@ export function messageForError(code: string): string {
     unsupported_route: m.error_unsupported_route,
     upstream_rejected: m.error_upstream_rejected,
     unauthorized: m.unauthorized,
+    forbidden: m.forbidden,
   };
   return messages[code]?.() ?? m.error_upstream_unavailable();
 }

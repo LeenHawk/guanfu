@@ -7,7 +7,8 @@
   import { chatApi, runChat } from "$lib/api/chat";
   import { ApiClientError } from "$lib/api/error";
   import AppHeader from "$lib/components/AppHeader.svelte";
-  import TokenGate from "$lib/components/TokenGate.svelte";
+  import AuthGate from "$lib/components/AuthGate.svelte";
+  import { authApi } from "$lib/api/auth";
   import ChatComposer from "$lib/components/ChatComposer.svelte";
   import ChatMessages from "$lib/components/ChatMessages.svelte";
   import ChatSidebar from "$lib/components/ChatSidebar.svelte";
@@ -28,6 +29,7 @@
   let running = $state(false);
   let submitting = $state(false);
   let errorCode = $state<string | null>(null);
+  let needsSetup = $state(false);
   let controller: AbortController | null = null;
 
   $effect(() => {
@@ -39,6 +41,13 @@
       error instanceof ApiClientError
         ? error.payload.code
         : "upstream_unavailable";
+    // 401 时问一下服务端有没有账号,决定弹"创建管理员"还是"登录"。
+    if (errorCode === "unauthorized") {
+      void authApi
+        .status()
+        .then((status) => (needsSetup = status.needs_setup))
+        .catch(() => (needsSetup = false));
+    }
   }
 
   async function run(task: () => Promise<void>) {
@@ -136,6 +145,16 @@
     }
   }
 
+  /** 共享 / 取消共享当前历史;共享后所有账号都能看到并继续。 */
+  function toggleShared() {
+    if (!selected) return;
+    void run(async () => {
+      const shared = selected!.head.owner_id !== null;
+      await authApi.setShared(selected!.head.id, shared);
+      await select(selected!.head.id);
+    });
+  }
+
   /** 分支:从当前消息数复制一份历史继续走,原历史不动。 */
   function fork() {
     if (!selected) return;
@@ -190,6 +209,15 @@
           </div>
           <div class="channel-actions">
             <button
+              class="text-button share-toggle"
+              type="button"
+              onclick={toggleShared}
+              disabled={running || submitting}
+              >{selected.head.owner_id === null
+                ? m.unshare()
+                : m.share()}</button
+            >
+            <button
               class="text-button"
               type="button"
               onclick={fork}
@@ -223,9 +251,10 @@
   </div>
 </div>
 
-<TokenGate
+<AuthGate
   open={errorCode === "unauthorized"}
-  onsaved={() => {
+  {needsSetup}
+  onsignedin={() => {
     errorCode = null;
     void load();
   }}
