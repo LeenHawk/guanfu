@@ -49,16 +49,31 @@
 
 ## 阶段 3：媒体能力接入
 
-- [ ] 生图 / 图编辑 UI（角色头像、场景图；按模型走 Gemini 双路由）
-- [ ] 视频任务 UI：创建 → 轮询 → 下载（`VideoJob.content_ref`）
-- [ ] 音频：speech / transcription 按路由矩阵接入
-- [ ] realtime 语音：Tauri Channel + Axum WebSocket 专用通道（core 双工已就绪，壳层目前显式拒绝）
-- [ ] pipeline 图泛化：并行分支、AgentLoop（裁决沿革见 `dev_docs/archive/pipeline-and-assets.md`）
+- [x] 生图 UI（创作台「生图」页；产物落成 Media Asset 并进媒体库）
+- [x] 视频任务 UI：创建 → 轮询 → 下载（`VideoJob.content_ref`）
+- [x] 音频：speech 合成与 transcription 转写按路由矩阵接入
+- [x] realtime 语音：Axum WebSocket 专用端点 + Tauri Channel 双工命令，
+      两壳共用一套下行帧;支持打字发言(合成麦克风下 VAD 切不出语音轮)
+- [x] pipeline 图泛化：拓扑分层执行，同层节点并发（并行分支即图形状），
+      新增 MediaGenerate / Map 节点，环与端口类型不匹配在加载期拒绝
 
-验收：角色配图与一次实时语音对话跑通。
+验收（真渠道 codex，2026-08-16）：媒体库从空开始，UI 生图产出 2.2 MB PNG
+并可从 AssetStore 回读；realtime 接通后模型给出实际回复。console 干净。
+
+阶段 3 未做（滚入后续）：图编辑（`edit_image` 已通到 API 与命令，UI 只有生成）、
+Gemini 生图双路由的 UI 侧模型分辨（后端路由矩阵已支持，前端不区分）、
+AgentLoop 节点（要等 Asset 操作挂成工具才有意义）、正则脚本执行授权
+（`TextTransform` 节点当前直通）。
 
 ## 阶段 4：打磨与发布
 
-- [ ] Axum 侧多用户：鉴权、多实例约束复查（跨实例状态、并发写）
-- [ ] 打包发布：`pnpm tauri build` 桌面产物；server 端部署方式
-- [ ] 性能与可观测性复查：span 覆盖关键链路、慢查询、前端 CLS / 首屏
+- [x] Axum 侧鉴权：共享令牌（`GUANFU_TOKEN`），未设令牌拒绝绑定非回环地址；
+      realtime 令牌随 WebSocket 首帧校验，不进 URL
+- [x] 多实例约束复查：数据库侧安全（不可变修订 + 头指针 CAS + 哈希幂等 chunk +
+      共享冷却），`LocalAssetStore` 是硬约束，见 `dev_docs/deployment.md`
+- [x] 打包发布：`pnpm tauri build` 桌面产物；server 端部署与反向代理要求文档化
+- [x] 性能与可观测性：关键链路 span（生成 / run / 图节点 / 媒体 / Asset 提交），
+      慢查询按 warn 单独报（>200ms）
+
+阶段 4 未做：真正的多用户身份（当前是共享秘密，不是逐用户隔离）、
+`AssetStore` 的 S3 实现、前端 CLS / 首屏的量化基线。
