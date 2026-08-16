@@ -84,7 +84,9 @@ impl S3AssetStore {
         key: &str,
         body: Option<&[u8]>,
     ) -> Result<reqwest::Response, CoreError> {
-        // path-style 寻址:R2 的自定义端点不支持 virtual-host 形式。
+        // path-style 寻址:R2 的账号端点只认这种形式。AWS / MinIO / Ceph /
+        // 各家兼容端点也都接受,但只认 virtual-hosted(bucket.endpoint/key)
+        // 的厂商用不了——真遇到时这里要按配置分叉。
         let path = format!("/{}/{}", self.config.bucket, key);
         let url = format!("{}{}", self.config.endpoint, path);
         let host = self
