@@ -1922,9 +1922,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-protocol"
-version = "2.8.1"
+version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9560528314d40a1ec10b6ca6a87af936a8ba06ce5e83b3cb0ef909dc0a886b4"
+checksum = "c7cdda786fe24b7f79fab4be396584ddb12fcabdbffd7141cc7db96bbf409613"
 dependencies = [
  "gproxy-protocol-macros",
  "http",
@@ -1934,9 +1934,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-protocol-macros"
-version = "2.8.1"
+version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad7a9df2db41b06523081bb7b47050d54930655d9b534a13dfb838993c8fae03"
+checksum = "6129bd0fcd9371f962c9d20bb994867099a31e7cd6cc2c11900ba99efbb05755"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1945,9 +1945,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-tokenize"
-version = "2.8.1"
+version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e04b9b49d6e1d92a84c6488ffe356b2aee44e3f0ab861058377778910001d0bf"
+checksum = "37da52bdc3f7b6256136999abdc65b5cb9acbca97320ad9ea988939fa54c0bbd"
 dependencies = [
  "serde_json",
  "tiktoken-rs",
@@ -1955,9 +1955,9 @@ dependencies = [
 
 [[package]]
 name = "gproxy-transform"
-version = "2.8.1"
+version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf95fd538f3f9e5dda69bdfe99daedad650dfa27ad0fe39628426e67c2d08b1"
+checksum = "ceef268f12a1d0de6accf0e19ce931be54d07c27f6c1fcfb6198f5e45e0018e9"
 dependencies = [
  "blake3",
  "gproxy-protocol",
