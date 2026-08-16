@@ -19,7 +19,7 @@ pnpm tauri build          # 产物在 backend/target/release/bundle/
 
 ```bash
 cargo build --release -p guanfu-server
-GUANFU_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
+GUANFU_BOOTSTRAP_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
   DATABASE_URL='sqlite://guanfu.db?mode=rwc' \
   GUANFU_ASSET_ROOT=/var/lib/guanfu/assets \
   ./target/release/guanfu-server
@@ -30,13 +30,14 @@ GUANFU_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
 | `DATABASE_URL` | `sqlite://guanfu.db?mode=rwc` | 数据库连接串 |
 | `GUANFU_ADDRESS` | `127.0.0.1:3000` | 监听地址 |
 | `GUANFU_ASSET_ROOT` | `guanfu-assets` | 二进制资产目录 |
-| `GUANFU_TOKEN` | 无 | 共享访问令牌 |
+| `GUANFU_BOOTSTRAP_TOKEN` | 无 | 引导令牌;公网监听且尚无账号时,首次注册必须带上 |
 | `GUANFU_S3_ENDPOINT` | 无 | 对象存储端点(不含桶名);配齐四项即启用 S3 |
 | `GUANFU_S3_BUCKET` | 无 | 桶名 |
 | `GUANFU_S3_ACCESS_KEY_ID` | 无 | 访问密钥 ID |
 | `GUANFU_S3_SECRET_ACCESS_KEY` | 无 | 访问密钥 |
 | `GUANFU_S3_REGION` | `auto` | 区域(R2 用 `auto`,AWS 用真实区域) |
 | `GUANFU_S3_PREFIX` | `chunks` | 对象键前缀 |
+| `GUANFU_S3_ADDRESSING` | `auto` | `auto` / `path` / `virtual`;auto 对 IP 与 localhost 用 path-style,其余用 virtual-hosted |
 | `RUST_LOG` | 无 | 日志过滤(如 `guanfu_core=debug`) |
 
 前端静态产物由 `pnpm --filter frontend build` 生成到 `frontend/build/`,
@@ -46,9 +47,13 @@ GUANFU_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
 只转发普通 HTTP 会让实时语音停在"连接中"而不报错(nginx 需要
 `proxy_set_header Upgrade $http_upgrade;` 与 `proxy_set_header Connection "upgrade";`)。
 
-**令牌不是可选项**:API 能读写渠道凭证,拿到 API 就等于拿到上游密钥的
-使用权。未设置 `GUANFU_TOKEN` 时进程拒绝绑定非回环地址。令牌是共享秘密,
-不是用户身份——持有者共用同一份资产与渠道,逐用户隔离需要真正的账号体系。
+**账号不是可选项**:API 能读写渠道凭证,拿到 API 就等于拿到上游密钥的
+使用权。首个注册者成为管理员,之后的账号只能由管理员创建。首次注册端点
+本身不能要求会话(还没有账号可登录),所以公网监听且尚无账号时必须配
+`GUANFU_BOOTSTRAP_TOKEN`,否则进程拒绝启动——不然谁先访问谁就是管理员。
+
+资产默认私有,可显式共享给所有账号;渠道与凭证是全局共享的基础设施,
+只有管理员能改。
 
 ## 多实例约束
 
@@ -63,7 +68,7 @@ GUANFU_TOKEN=... GUANFU_ADDRESS=0.0.0.0:3000 \
 
 **存储是唯一的硬约束**:`LocalAssetStore` 写本机目录,多实例各写各的,
 一个实例存的图另一个读不到。多实例部署必须配 `GUANFU_S3_*` 走对象存储
-(已对 Cloudflare R2 实测)。
+(已对 Cloudflare R2 实测 path / virtual / auto 三种寻址)。
 
 SQLite 同样是单机方案;多实例应换成独立数据库服务。
 

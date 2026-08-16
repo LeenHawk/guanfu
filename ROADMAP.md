@@ -75,5 +75,18 @@ AgentLoop 节点（要等 Asset 操作挂成工具才有意义）、正则脚本
 - [x] 性能与可观测性：关键链路 span（生成 / run / 图节点 / 媒体 / Asset 提交），
       慢查询按 warn 单独报（>200ms）
 
-阶段 4 未做：真正的多用户身份（当前是共享秘密，不是逐用户隔离）、
-`AssetStore` 的 S3 实现、前端 CLS / 首屏的量化基线。
+补齐（2026-08-16）：
+
+- 真正的多用户：账号 / 会话（argon2id + 只存令牌哈希），资产按归属隔离，
+  私有默认、可共享；首个账号即管理员，之后由管理员建号。渠道全局共享、
+  仅管理员可改。桌面壳用本地账号，两壳同一套可见性规则。会话可在账号面板
+  逐个吊销或「在其他设备上登出」。
+- `AssetStore` 的 S3 实现：自签 SigV4，path-style 与 virtual-hosted 两种寻址
+  都支持（默认 auto：IP / localhost 走 path，其余走 virtual-hosted），
+  三种模式均对 Cloudflare R2 实测。
+- 前端首屏 / CLS 基线：见 `dev_docs/deployment.md`；CLS 从 0.047 降到 0。
+- 懒加载：媒体库进入视口才取 src（桌面壳的 data URL 会把整份文件读进内存，
+  `loading="lazy"` 拦不住）；聊天历史只渲染最近 60 条，更早的按需展开。
+
+仍未做：逐用户的渠道配额、Azure Blob（无 S3 兼容端点，需另写一个
+`AssetStore` 实现）、聊天历史的真正虚拟滚动（当前是分段展开）。

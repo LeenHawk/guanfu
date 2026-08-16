@@ -10,6 +10,45 @@ use super::store::{store_error, AssetStore};
 use crate::assets::ChunkHash;
 use crate::CoreError;
 
+/// 桶在 URL 里的位置。两种形式各家支持不一,所以做成配置而不是假设。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Addressing {
+    /// 端点是 IP 或 localhost 时用 path-style(自建 MinIO/Ceph 常见,
+    /// 且 IP 上没法加桶名子域);其余用 virtual-hosted,这是 AWS 的
+    /// 标准形式,兼容端点普遍也认。
+    #[default]
+    Auto,
+    /// `{endpoint}/{bucket}/{key}`
+    Path,
+    /// `{scheme}://{bucket}.{host}/{key}`
+    VirtualHosted,
+}
+
+impl Addressing {
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "path" | "path_style" | "path-style" => Self::Path,
+            "virtual" | "virtual_hosted" | "virtual-hosted" => Self::VirtualHosted,
+            _ => Self::Auto,
+        }
+    }
+
+    fn resolve(self, host: &str) -> Self {
+        match self {
+            Self::Auto => {
+                let bare = host.split(':').next().unwrap_or(host);
+                let numeric = bare.split('.').all(|part| part.parse::<u8>().is_ok());
+                if bare == "localhost" || numeric {
+                    Self::Path
+                } else {
+                    Self::VirtualHosted
+                }
+            }
+            explicit => explicit,
+        }
+    }
+}
+
 /// 连接配置;凭证只在进程内存里,不写库不进日志。
 #[derive(Clone)]
 pub struct S3Config {
@@ -21,6 +60,7 @@ pub struct S3Config {
     pub secret_access_key: String,
     /// 对象键前缀,便于一个桶放多个环境。
     pub prefix: String,
+    pub addressing: Addressing,
 }
 
 impl std::fmt::Debug for S3Config {
@@ -31,6 +71,7 @@ impl std::fmt::Debug for S3Config {
             .field("bucket", &self.bucket)
             .field("region", &self.region)
             .field("prefix", &self.prefix)
+            .field("addressing", &self.addressing)
             .finish_non_exhaustive()
     }
 }
@@ -64,6 +105,9 @@ impl S3AssetStore {
             access_key_id,
             secret_access_key,
             prefix: std::env::var("GUANFU_S3_PREFIX").unwrap_or_else(|_| "chunks".to_owned()),
+            addressing: std::env::var("GUANFU_S3_ADDRESSING")
+                .map(|value| Addressing::parse(&value))
+                .unwrap_or_default(),
         })
     }
 
@@ -84,18 +128,24 @@ impl S3AssetStore {
         key: &str,
         body: Option<&[u8]>,
     ) -> Result<reqwest::Response, CoreError> {
-        // path-style 寻址:R2 的账号端点只认这种形式。AWS / MinIO / Ceph /
-        // 各家兼容端点也都接受,但只认 virtual-hosted(bucket.endpoint/key)
-        // 的厂商用不了——真遇到时这里要按配置分叉。
-        let path = format!("/{}/{}", self.config.bucket, key);
-        let url = format!("{}{}", self.config.endpoint, path);
-        let host = self
+        let (scheme, endpoint_host) = self
             .config
             .endpoint
-            .split("://")
-            .nth(1)
-            .ok_or_else(|| store_error("s3 endpoint must include a scheme"))?
-            .to_owned();
+            .split_once("://")
+            .ok_or_else(|| store_error("s3 endpoint must include a scheme"))?;
+        // 签名要覆盖 Host,而 Host 取决于桶放在域名里还是路径里,
+        // 所以寻址方式必须在签名之前定下来。
+        let (host, path) = match self.config.addressing.resolve(endpoint_host) {
+            Addressing::Path | Addressing::Auto => (
+                endpoint_host.to_owned(),
+                format!("/{}/{}", self.config.bucket, key),
+            ),
+            Addressing::VirtualHosted => (
+                format!("{}.{}", self.config.bucket, endpoint_host),
+                format!("/{key}"),
+            ),
+        };
+        let url = format!("{scheme}://{host}{path}");
 
         let payload = body.unwrap_or(&[]);
         let payload_hash = hex::encode(Sha256::digest(payload));
@@ -248,4 +298,33 @@ fn uri_encode_path(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Addressing;
+
+    /// auto 的判定:IP 与 localhost 走 path(域名下挂不了桶名子域),
+    /// 其余走 virtual-hosted(AWS 的标准形式)。
+    #[test]
+    fn auto_addressing_falls_back_to_path_only_where_subdomains_cannot_work() {
+        assert_eq!(
+            Addressing::Auto.resolve("s3.amazonaws.com"),
+            Addressing::VirtualHosted
+        );
+        assert_eq!(
+            Addressing::Auto.resolve("abc.r2.cloudflarestorage.com"),
+            Addressing::VirtualHosted
+        );
+        assert_eq!(Addressing::Auto.resolve("localhost:9000"), Addressing::Path);
+        assert_eq!(Addressing::Auto.resolve("127.0.0.1:9000"), Addressing::Path);
+        // 显式配置不被 auto 的启发式覆盖。
+        assert_eq!(
+            Addressing::Path.resolve("s3.amazonaws.com"),
+            Addressing::Path
+        );
+        assert_eq!(Addressing::parse("path-style"), Addressing::Path);
+        assert_eq!(Addressing::parse("virtual"), Addressing::VirtualHosted);
+        assert_eq!(Addressing::parse("nonsense"), Addressing::Auto);
+    }
 }
