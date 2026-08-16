@@ -1,7 +1,7 @@
 {
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "app_title": "观复",
-  "app_subtitle": "渠道与路由",
+  "app_subtitle": "角色扮演",
   "channels": "渠道",
   "new_channel": "新建渠道",
   "channel_name": "渠道名称",

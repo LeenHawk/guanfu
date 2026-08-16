@@ -130,3 +130,14 @@
     max-width: 140px;
   }
 }
+
+@media (max-width: 680px) {
+  .app-nav a {
+    padding: 8px 10px;
+    /* 两个字的导航项被挤成竖排会读不出来。 */
+    white-space: nowrap;
+  }
+  .app-nav {
+    margin-right: 4px;
+  }
+}
