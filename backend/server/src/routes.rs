@@ -45,6 +45,10 @@ pub fn router(state: AppState) -> Router {
             get(list_histories).post(create_history),
         )
         .route("/api/chat/histories/{id}", get(load_history))
+        .route(
+            "/api/chat/histories/{id}/fork",
+            axum::routing::post(fork_history),
+        )
         .route("/api/chat/runs", axum::routing::post(run_chat))
         .with_state(state)
 }
@@ -152,6 +156,23 @@ async fn load_history(
     Path(id): Path<i32>,
 ) -> Result<impl IntoResponse, HttpError> {
     Ok(Json(ChatService::load_history(&state.db, id).await?))
+}
+
+#[derive(serde::Deserialize)]
+struct ForkHistory {
+    title: String,
+    message_count: u32,
+}
+
+async fn fork_history(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    Json(input): Json<ForkHistory>,
+) -> Result<impl IntoResponse, HttpError> {
+    Ok((
+        StatusCode::CREATED,
+        Json(ChatService::fork_history(&state.db, id, input.message_count, &input.title).await?),
+    ))
 }
 
 /// 聊天 run:pipeline 事件以 SSE 推给前端;客户端断开即取消。

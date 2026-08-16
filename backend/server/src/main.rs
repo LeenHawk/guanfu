@@ -16,8 +16,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = std::env::var("GUANFU_ADDRESS")
         .unwrap_or_else(|_| "127.0.0.1:3000".to_owned())
         .parse::<SocketAddr>()?;
+    let asset_root = std::env::var("GUANFU_ASSET_ROOT")
+        .unwrap_or_else(|_| "guanfu-assets".to_owned())
+        .into();
     let state = AppState::initialize(AppConfig {
         database_url,
+        asset_root,
         llm: LlmConfig::default(),
     })
     .await?;

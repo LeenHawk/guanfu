@@ -25,6 +25,7 @@ pub fn run() {
                 format!("sqlite://{}?mode=rwc", data_dir.join("guanfu.db").display());
             let state = tauri::async_runtime::block_on(AppState::initialize(AppConfig {
                 database_url,
+                asset_root: data_dir.join("assets"),
                 llm: LlmConfig::default(),
             }))?;
             app.manage(state);
@@ -50,6 +51,7 @@ pub fn run() {
             commands::bootstrap_chat,
             commands::create_chat_history,
             commands::load_chat_history,
+            commands::fork_chat_history,
             commands::run_chat,
         ])
         .run(tauri::generate_context!())

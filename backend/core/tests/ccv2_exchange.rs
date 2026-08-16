@@ -18,6 +18,7 @@ const CARD: &str = concat!(
 async fn db() -> sea_orm::DatabaseConnection {
     guanfu_core::AppState::initialize(guanfu_core::AppConfig {
         database_url: "sqlite::memory:".to_owned(),
+        asset_root: std::env::temp_dir().join("guanfu-test-assets"),
         llm: guanfu_core::LlmConfig::default(),
     })
     .await

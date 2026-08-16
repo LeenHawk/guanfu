@@ -30,15 +30,22 @@
 
 实施依据 `dev_docs/roleplay-assets-plan.md`：
 
-- [ ] Asset 实体体系：头指针 + 不可变修订 + 内容寻址 chunk（实心与 JSON 资产同一机制），二进制落 File/S3
-- [ ] 领域 definition：character / persona / 世界书 / 预设 / 正则 / **聊天历史**（历史即 Asset：typed 消息内容 + 会话默认绑定 + fork 来源）
-- [ ] **Run（运行）模型**：多 Asset 槽位输入 → pipeline 执行 → Asset 输出（新建 / 追加 / HashEdit 修订）；输入 revision 钉住，聊天只是默认 run 模板
-- [ ] CCv2 导入导出（PNG `chara` chunk 与 JSON），fixture round-trip 验收
-- [ ] ContextBuild 纯函数：prompt_order 编排、世界书激活（关键词/预算/位置）、宏子集、深度注入，以 ST fixture 单测
-- [ ] 超集 workflow schema（槽位签名 + 节点图 + 输出声明）；V1 runner 限线性链，内置聊天默认模板
-- [ ] 聊天 UI：ChatHistory 视图 + 继续对话 run，流式渲染、markdown、重试与 fork
+- [x] Asset 实体体系：头指针 + 不可变修订 + 内容寻址 chunk（实心与 JSON 资产同一机制），二进制落 File/S3
+- [x] 领域 definition：character / persona / 世界书 / 预设 / 正则 / **聊天历史**（历史即 Asset：typed 消息内容 + 会话默认绑定 + fork 来源）
+- [x] **Run（运行）模型**：多 Asset 槽位输入 → pipeline 执行 → Asset 输出（新建 / 追加 / HashEdit 修订）；输入 revision 钉住，聊天只是默认 run 模板
+- [x] CCv2 导入导出（PNG `chara` chunk 与 JSON），fixture round-trip 验收
+- [x] ContextBuild 纯函数：prompt_order 编排、世界书激活（关键词/预算/位置）、宏子集、深度注入，以 ST fixture 单测
+- [x] 超集 workflow schema（槽位签名 + 节点图 + 输出声明）；V1 runner 限线性链，内置聊天默认模板
+- [x] 聊天 UI：ChatHistory 视图 + 继续对话 run，流式渲染、markdown、重试与 fork
 
 验收：完整走一轮角色扮演对话并持久化，重启后可继续；同一份历史可作为其他 run 模板的输入（如总结成世界书）。
+
+已验收（真渠道 codex / gpt-5.6-sol）：UI 导入 Seraphina 角色卡 → 新建对话 → 流式回复 →
+刷新后历史仍在（修订推进到 2，assistant 轮存的是 typed output items）。fork 经接口验证：
+分支只保留到指定消息数，源历史不变。
+
+阶段 2 未做（滚入后续）：Persona 与世界书的编辑 UI、预设编辑 UI、Media Asset 的
+上传/引用接线（`AssetStore` 已就绪但尚未有业务入口）、Asset 操作挂给 LLM 的工具循环。
 
 ## 阶段 3：媒体能力接入
 

@@ -107,6 +107,9 @@ pub enum CoreError {
 
     #[error("invalid exchange payload: {reason}")]
     InvalidExchangePayload { reason: String },
+
+    #[error("asset store failure: {reason}")]
+    AssetStore { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -202,6 +205,7 @@ impl CoreError {
             Self::UnsupportedExchangeFormat { format } => {
                 (ErrorCode::InvalidData, Some(json!({ "format": format })))
             }
+            Self::AssetStore { .. } => (ErrorCode::Database, None),
             Self::InvalidExchangePayload { reason } => {
                 (ErrorCode::InvalidData, Some(json!({ "reason": reason })))
             }

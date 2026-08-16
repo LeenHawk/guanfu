@@ -13,6 +13,7 @@ use guanfu_core::services::routing::{
 async fn entity_first_sync_and_crud() {
     let state = guanfu_core::AppState::initialize(guanfu_core::AppConfig {
         database_url: "sqlite::memory:".into(),
+        asset_root: std::env::temp_dir().join("guanfu-test-assets"),
         llm: guanfu_core::LlmConfig::default(),
     })
     .await

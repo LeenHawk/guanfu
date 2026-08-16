@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use sea_orm::DatabaseConnection;
 
+use crate::assets::{AssetStore, LocalAssetStore};
 use crate::services::llm::LlmService;
 use crate::{db, CoreError};
 
@@ -24,6 +25,8 @@ impl Default for LlmConfig {
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub database_url: String,
+    /// 二进制内容的本地存放目录。
+    pub asset_root: std::path::PathBuf,
     pub llm: LlmConfig,
 }
 
@@ -31,6 +34,7 @@ pub struct AppConfig {
 pub struct AppState {
     pub db: DatabaseConnection,
     pub llm: Arc<LlmService>,
+    pub assets: Arc<dyn AssetStore>,
     pub config: AppConfig,
 }
 
@@ -43,6 +47,15 @@ impl AppState {
             config.llm.connect_timeout,
             config.llm.request_timeout,
         ));
-        Ok(Self { db, llm, config })
+        std::fs::create_dir_all(&config.asset_root).map_err(|error| CoreError::AssetStore {
+            reason: error.to_string(),
+        })?;
+        let assets = Arc::new(LocalAssetStore::new(config.asset_root.clone()));
+        Ok(Self {
+            db,
+            llm,
+            assets,
+            config,
+        })
     }
 }

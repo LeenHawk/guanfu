@@ -26,6 +26,7 @@ pub mod pipeline;
 pub mod preset;
 pub mod refs;
 pub mod regex_script;
+pub mod store;
 pub mod world_book;
 
 pub use character::CharacterDefinition;
@@ -36,6 +37,7 @@ pub use pipeline::PipelineDefinition;
 pub use preset::OpenAiChatPresetDefinition;
 pub use refs::Extra;
 pub use regex_script::RegexScriptDefinition;
+pub use store::{AssetStore, LocalAssetStore};
 pub use world_book::WorldBookDefinition;
 
 /// 内容寻址哈希(sha256 hex)。

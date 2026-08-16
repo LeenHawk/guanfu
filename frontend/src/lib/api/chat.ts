@@ -43,6 +43,18 @@ export const chatApi = {
           body: JSON.stringify({ title, bindings }),
         }),
 
+  forkHistory: (
+    id: number,
+    messageCount: number,
+    title: string,
+  ): Promise<AssetHeadDto> =>
+    isTauri()
+      ? invokeCommand("fork_chat_history", { id, messageCount, title })
+      : requestJson(`/api/chat/histories/${id}/fork`, {
+          method: "POST",
+          body: JSON.stringify({ title, message_count: messageCount }),
+        }),
+
   loadHistory: (id: number): Promise<ChatHistoryView> =>
     isTauri()
       ? invokeCommand("load_chat_history", { id })

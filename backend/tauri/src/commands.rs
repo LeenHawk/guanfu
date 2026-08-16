@@ -250,6 +250,18 @@ pub async fn load_chat_history(
         .map_err(api_error)
 }
 
+#[tauri::command]
+pub async fn fork_chat_history(
+    state: State<'_, AppState>,
+    id: i32,
+    message_count: u32,
+    title: String,
+) -> Result<AssetHeadDto, ApiError> {
+    ChatService::fork_history(&state.db, id, message_count, &title)
+        .await
+        .map_err(api_error)
+}
+
 /// 聊天 run:pipeline 事件走 Channel,取消复用 LLM 的取消表。
 #[tauri::command]
 pub async fn run_chat(

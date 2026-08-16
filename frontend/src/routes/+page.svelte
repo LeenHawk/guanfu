@@ -135,6 +135,20 @@
     }
   }
 
+  /** 分支:从当前消息数复制一份历史继续走,原历史不动。 */
+  function fork() {
+    if (!selected) return;
+    void run(async () => {
+      const head = await chatApi.forkHistory(
+        selected!.head.id,
+        selected!.messages.length,
+        `${selected!.title} · ${m.fork()}`,
+      );
+      histories = [...histories, head];
+      await select(head.id);
+    });
+  }
+
   /** 重试:去掉上一轮 assistant 回复后按同样输入再跑一次。 */
   function retry() {
     const messages = selected?.messages ?? [];
@@ -172,6 +186,14 @@
           <div>
             <h2>{selected.title}</h2>
             {#if running}<p>{m.thinking()}</p>{/if}
+          </div>
+          <div class="channel-actions">
+            <button
+              class="text-button"
+              type="button"
+              onclick={fork}
+              disabled={running || submitting}>{m.fork()}</button
+            >
           </div>
         </header>
         <ChatMessages messages={selected.messages} {streaming} />

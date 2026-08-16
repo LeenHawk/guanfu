@@ -85,6 +85,29 @@ impl ChatService {
         .await
     }
 
+    /// 分支:复制到指定消息数为止,并记录来源。
+    ///
+    /// manifest 复制 + chunk 结构共享,因此 fork 不按历史长度收费。
+    pub async fn fork_history(
+        db: &impl ConnectionTrait,
+        id: i32,
+        message_count: u32,
+        title: &str,
+    ) -> Result<AssetHeadDto, CoreError> {
+        use crate::assets::refs::ChatHistoryRef;
+
+        let loaded = AssetService::load::<ChatHistoryDefinition>(db, id).await?;
+        let ChatHistoryDefinition::V1(mut history) = loaded.definition;
+        history.messages.truncate(message_count as usize);
+        history.title = title.to_owned();
+        history.forked_from = Some(crate::assets::chat_history::ForkOrigin {
+            source: ChatHistoryRef(id),
+            source_revision: loaded.revision,
+            message_count,
+        });
+        AssetService::create(db, title, None, &ChatHistoryDefinition::V1(history)).await
+    }
+
     pub async fn load_history(
         db: &impl ConnectionTrait,
         id: i32,
