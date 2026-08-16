@@ -18,11 +18,11 @@
 
 ## 阶段 1：通路收尾与前端基建补课
 
-- [ ] failover 真渠道验证：坏凭证触发轮换 / 冷却 / 恢复三条路径
-- [ ] 取消与超时复查：Axum 客户端断开 → 上游请求中止；两壳超时语义一致
-- [ ] i18n 引入（Paraglide；中文默认 + fallback），AGENTS.md 回填方案
-- [ ] 主题收尾：跟随系统 + 手动切换、首屏无闪烁、favicon 亮暗
-- [ ] 渠道 UI 打磨：表单验证、loading/empty/error 状态、移动端；Chrome DevTools 验收（三档断点、亮暗、console 干净）
+- [x] failover 真渠道验证：坏凭证触发轮换 / 冷却 / 恢复三条路径
+- [x] 取消与超时复查：Axum 客户端断开 → 上游请求中止；两壳超时语义一致
+- [x] i18n 引入（Paraglide；中文默认 + fallback），AGENTS.md 回填方案
+- [x] 主题收尾：跟随系统 + 手动切换、首屏无闪烁、favicon 亮暗
+- [x] 渠道 UI 打磨：表单验证、loading/empty/error 状态、移动端；Chrome DevTools 验收（三档断点、亮暗、console 干净）
 
 验收：UI 完整配置一个真实渠道并调通生成；拔掉首选凭证后请求仍成功。
 
