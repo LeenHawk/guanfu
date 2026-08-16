@@ -3,6 +3,7 @@
   import type { SemanticStreamMessage } from "$lib/bindings/SemanticStreamMessage";
   import type { ChannelDto } from "$lib/bindings/ChannelDto";
   import { executeLlm } from "$lib/api/llm";
+  import { messageForError } from "$lib/i18n/errors";
   import { m } from "$lib/paraglide/messages.js";
 
   let { channel }: { channel: ChannelDto } = $props();
@@ -14,7 +15,7 @@
 
   function append(message: SemanticStreamMessage) {
     if (message.type === "error") {
-      result += `${message.error.code}\n`;
+      result += `${messageForError(message.error.code)}\n`;
       return;
     }
     const operationEvent = message.event;

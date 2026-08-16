@@ -57,7 +57,7 @@ pnpm 命令均在仓库根目录执行（脚本代理到 frontend）：
 - 状态完整性：异步页面覆盖 loading / empty / error / success；提交中按钮 disabled 防重复；错误要展示给用户，不许只 console
 - 表单：统一验证方式；客户端验证只为体验、不可信任；错误提示挂在对应字段且可被辅助技术识别
 - 交互一致性：Modal / Toast / Confirm / Dropdown / 分页 / 搜索等同类交互用统一组件，不各页各写一套
-- i18n：使用 Paraglide JS，默认语言为 `zh-CN`、fallback 为基础语言；文案全走词条不硬编码、不拼接句子；日期 / 数字 / 货币按 locale 格式化
+- i18n：使用 Paraglide JS，默认语言为 `zh-CN`、fallback 为基础语言；文案全走词条不硬编码、不拼接句子；日期 / 数字 / 货币按 locale 格式化。落地方式：词条在仓库根 `messages/{locale}.json`（inlang message-format，项目配置在 `project.inlang/`），`frontend/vite.config.js` 的 `paraglideVitePlugin` 生成 `src/lib/paraglide/`（gitignore，不提交不手改）；locale 采用 `localStorage` 策略（键 `PARAGLIDE_LOCALE`），`app.html` 首屏脚本据此设置 `<html lang>`；组件从 `$lib/paraglide/messages.js` 导入 `m` 调用词条；错误码与路由枚举的展示文案分别集中在 `$lib/i18n/errors.ts`、`$lib/i18n/routing.ts`
 - 亮暗模式：跟随系统 + 可手动切换；主题差异只走 CSS / Tailwind `dark:`，禁止 JS 维护两套颜色；首屏不闪主题
 - 响应式：桌面 / 平板 / 手机三档可用（Tailwind 断点）；表格、弹窗、导航要有明确移动端策略，触控目标 ≥ 44px；考虑超长文本 / URL / i18n 文案扩张的溢出，不依赖固定文案长度撑布局
 - 无障碍：语义化 HTML、键盘可操作、alt / label 齐全，不压制 Svelte 的 a11y 警告；关键控件保持稳定语义（同时服务测试）；动画只为反馈服务并支持 prefers-reduced-motion

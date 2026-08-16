@@ -10,6 +10,7 @@
   import ChannelDialog from "$lib/components/ChannelDialog.svelte";
   import ChannelSidebar from "$lib/components/ChannelSidebar.svelte";
   import ChannelWorkspace from "$lib/components/ChannelWorkspace.svelte";
+  import { messageForError } from "$lib/i18n/errors";
   import { m } from "$lib/paraglide/messages.js";
 
   let channels = $state<ChannelDto[]>([]);
@@ -74,20 +75,6 @@
       await selectChannel(channel.id);
       dialogOpen = false;
     });
-  }
-
-  function messageForError(code: string): string {
-    const messages: Record<string, () => string> = {
-      database: m.error_database,
-      upstream_unavailable: m.error_upstream_unavailable,
-      invalid_data: m.error_invalid_data,
-      invalid_route: m.error_invalid_route,
-      channel_not_found: m.error_channel_not_found,
-      no_usable_credential: m.error_no_usable_credential,
-      unsupported_route: m.error_unsupported_route,
-      upstream_rejected: m.error_upstream_rejected,
-    };
-    return messages[code]?.() ?? m.error_upstream_unavailable();
   }
 </script>
 
@@ -160,6 +147,7 @@
             operation: RoutingOperation,
             kind: RoutingKind,
             action: string,
+            targetOperation: RoutingOperation,
             targetKind: RoutingKind,
           ) =>
             run(async () => {
@@ -167,7 +155,7 @@
                 action === "transform_to"
                   ? {
                       type: "transform_to" as const,
-                      target: { operation, kind: targetKind },
+                      target: { operation: targetOperation, kind: targetKind },
                     }
                   : { type: action as "passthrough" | "local" | "unsupported" };
               const item = await api.putRoutingRule({

@@ -14,6 +14,8 @@
       document.getElementById("app-favicon").href = dark
         ? "%sveltekit.assets%/favicon-dark.svg"
         : "%sveltekit.assets%/favicon.png";
+      const locale = localStorage.getItem("PARAGLIDE_LOCALE");
+      if (locale) document.documentElement.lang = locale;
     </script>
     <title>观复</title>
     %sveltekit.head%

@@ -37,6 +37,7 @@
       operation: RoutingOperation,
       kind: RoutingKind,
       action: string,
+      targetOperation: RoutingOperation,
       targetKind: RoutingKind,
     ) => Promise<void>;
     onremoveroute: (id: number) => Promise<void>;

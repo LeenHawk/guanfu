@@ -2,22 +2,13 @@
   import type { RoutingKind } from "$lib/bindings/RoutingKind";
   import type { RoutingOperation } from "$lib/bindings/RoutingOperation";
   import type { RoutingRuleDto } from "$lib/bindings/RoutingRuleDto";
+  import {
+    kindLabel,
+    kindsFor,
+    operationLabel,
+    operations,
+  } from "$lib/i18n/routing";
   import { m } from "$lib/paraglide/messages.js";
-
-  const operations: RoutingOperation[] = [
-    "generate_content",
-    "stream_generate_content",
-    "count_tokens",
-    "list_models",
-    "get_model",
-  ];
-  const contentKinds: RoutingKind[] = [
-    "open_ai_responses",
-    "open_ai_chat_completions",
-    "claude_messages",
-    "gemini_generate_content",
-  ];
-  const providerKinds: RoutingKind[] = ["open_ai", "claude", "gemini"];
 
   let {
     rules,
@@ -31,6 +22,7 @@
       operation: RoutingOperation,
       kind: RoutingKind,
       action: string,
+      targetOperation: RoutingOperation,
       targetKind: RoutingKind,
     ) => Promise<void>;
     onremove: (id: number) => Promise<void>;
@@ -40,20 +32,23 @@
   let operation = $state<RoutingOperation>("generate_content");
   let kind = $state<RoutingKind>("open_ai_responses");
   let action = $state("passthrough");
+  // 目标操作默认跟随源操作(常见情形同操作换格式),可手动改成跨操作。
+  let targetOperation = $derived<RoutingOperation>(operation);
   let targetKind = $state<RoutingKind>("claude_messages");
-  let kinds = $derived(
-    operation === "generate_content" || operation === "stream_generate_content"
-      ? contentKinds
-      : providerKinds,
-  );
+  let kinds = $derived(kindsFor(operation));
+  let targetKinds = $derived(kindsFor(targetOperation));
 
   $effect(() => {
     if (!kinds.includes(kind)) kind = kinds[0];
   });
 
+  $effect(() => {
+    if (!targetKinds.includes(targetKind)) targetKind = targetKinds[0];
+  });
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    await onput(operation, kind, action, targetKind);
+    await onput(operation, kind, action, targetOperation, targetKind);
     adding = false;
   }
 
@@ -62,6 +57,14 @@
     if (type === "local") return m.local();
     if (type === "unsupported") return m.unsupported();
     return m.passthrough();
+  }
+
+  function targetSummary(rule: RoutingRuleDto): string {
+    if (rule.implementation.type !== "transform_to") return "";
+    const target = rule.implementation.target;
+    return target.operation === rule.source.operation
+      ? kindLabel(target.kind)
+      : `${operationLabel(target.operation)} · ${kindLabel(target.kind)}`;
   }
 </script>
 
@@ -79,13 +82,15 @@
     <form class="inline-form route-form" onsubmit={submit}>
       <label
         >{m.source_operation()}<select bind:value={operation}
-          >{#each operations as value (value)}<option {value}>{value}</option
+          >{#each operations as value (value)}<option {value}
+              >{operationLabel(value)}</option
             >{/each}</select
         ></label
       >
       <label
         >{m.source_kind()}<select bind:value={kind}
-          >{#each kinds as value (value)}<option {value}>{value}</option
+          >{#each kinds as value (value)}<option {value}
+              >{kindLabel(value)}</option
             >{/each}</select
         ></label
       >
@@ -100,8 +105,16 @@
       >
       {#if action === "transform_to"}
         <label
+          >{m.target_operation()}<select bind:value={targetOperation}
+            >{#each operations as value (value)}<option {value}
+                >{operationLabel(value)}</option
+              >{/each}</select
+          ></label
+        >
+        <label
           >{m.target_kind()}<select bind:value={targetKind}
-            >{#each kinds as value (value)}<option {value}>{value}</option
+            >{#each targetKinds as value (value)}<option {value}
+                >{kindLabel(value)}</option
               >{/each}</select
           ></label
         >
@@ -118,21 +131,20 @@
       {#each rules as rule (rule.id)}
         <div class="data-row route-row">
           <div>
-            <strong>{rule.source.operation}</strong><small
-              >{rule.source.kind}</small
+            <strong>{operationLabel(rule.source.operation)}</strong><small
+              >{kindLabel(rule.source.kind)}</small
             >
           </div>
           <span class="route-line" aria-hidden="true"></span>
           <div>
             <strong>{actionLabel(rule.implementation.type)}</strong><small
-              >{rule.implementation.type === "transform_to"
-                ? rule.implementation.target.kind
-                : ""}</small
+              >{targetSummary(rule)}</small
             >
           </div>
           <button
             class="danger-link"
             type="button"
+            disabled={submitting}
             onclick={() =>
               confirm(m.confirm_delete_item()) && onremove(rule.id)}
             >{m.delete()}</button
